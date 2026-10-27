@@ -6,8 +6,9 @@ services, checks the JWT of the caller and runs the user registration flow.
 
 [![CI](https://github.com/ArsShark/ApiGateway/actions/workflows/ci.yml/badge.svg)](https://github.com/ArsShark/ApiGateway/actions/workflows/ci.yml)
 
-**Status:** project skeleton, Dockerfile, CI pipeline and the security filter (JWT check).
-The routes and the registration flow arrive in the next pull requests (JACAG-19).
+**Status:** project skeleton, Dockerfile, CI pipeline, the security filter (JWT check) and the
+routes to the User Service and the Authentication Service. The registration flow and the Docker
+Compose of the whole system arrive in the next pull requests (JACAG-19).
 
 ## Requirements
 
@@ -25,6 +26,8 @@ files hold only the default address of the Authentication Service.
 |---|---|---|
 | `SERVER_PORT` | `8080` | HTTP port |
 | `LOG_DIR` | `logs` | Directory of the log files |
+| `USER_SERVICE_URI` | `local`: `http://localhost:8082`, `docker`: `http://user-service:8082` | Internal address of the User Service |
+| `AUTH_SERVICE_URI` | `local`: `http://localhost:8081`, `docker`: `http://authentication-service:8081` | Internal address of the Authentication Service |
 | `AUTH_JWKS_URI` | `local`: `http://localhost:8081/.well-known/jwks.json`, `docker`: `http://authentication-service:8081/.well-known/jwks.json` | Internal address of the key set of the Authentication Service. Never the address of the Gateway: it does not route the key set |
 | `JWT_ISSUER` | `authentication-service` | The `iss` that a token must have; the same value as in the Authentication Service |
 
@@ -51,6 +54,26 @@ anything. The chain is stateless and closed by default.
   5 minutes. A token with an unknown key id causes a new call at most once per 30 seconds. If
   the key set cannot be read, the token is refused (401), never accepted and never a 500.
 - The header `X-Internal-Key` of a request from outside is removed before anything else runs.
+
+## Routes
+
+| Public request | Goes to |
+|---|---|
+| `/api/users/**`, `/api/cards/**` (any method) | User Service |
+| `POST /api/auth/login`, `/api/auth/refresh`, `/api/auth/validate` | Authentication Service |
+| `POST /api/auth/register` | answered by the Gateway itself (next pull request), never proxied |
+
+- The routes only decide where a path goes; the security rules decide who may call it. A path
+  without a route is a 404. `/internal/**` and the key set of the Authentication Service are not
+  routed.
+- The Gateway waits 2 seconds to connect to a service and 10 seconds for its answer. The answer of
+  a service, its errors included, is passed on unchanged.
+- When a service cannot be reached the caller gets an RFC 9457 problem with a constant detail: 502
+  `Bad Gateway` (refused, dropped, unknown host), 504 `Gateway Timeout` (no answer in time).
+  The internal address of the service is never in the answer.
+- The headers `X-Internal-Key`, `Forwarded` and `X-Forwarded-*` of a request from outside are
+  removed. The Gateway adds its own `X-Forwarded-*` headers, so a client cannot make the services
+  build links to a host of its own.
 
 ## Run locally
 
@@ -91,6 +114,7 @@ the tests. The JaCoCo report is written to `target/site/jacoco/`.
 
 - An access token cannot be revoked: it is valid until it expires (15 minutes). A user that is
   deactivated or deleted keeps a working token until then.
+- The Gateway does not retry and has no circuit breaker: a failed call is a 502 or 504 at once.
 - There is no limit for the number of login attempts. A rate limit needs a shared store (Redis),
   which the Gateway does not have in the architecture.
 - At the log level `DEBUG` or `TRACE` the HTTP client of Spring and Reactor Netty write the
