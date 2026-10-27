@@ -17,13 +17,13 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 /**
- * Checks the token check through the whole filter chain. No rule opens any path yet, so a valid
- * token is authenticated and then denied (403), and every bad token gets exactly the answer of a
- * request without a token (401).
+ * Checks the token check through the whole filter chain. The path is one that no rule opens, so
+ * a valid token is authenticated and then denied (403), and every bad token gets exactly the
+ * answer of a request without a token (401).
  */
 class BearerTokenIntegrationTest extends AbstractIntegrationTest {
 
-  private static final String PATH = "/api/users/1";
+  private static final String PATH = "/internal/users";
 
   static Stream<Arguments> badTokens() {
     KeyPair other = TestKeys.generateRsa(2048);
@@ -47,7 +47,7 @@ class BearerTokenIntegrationTest extends AbstractIntegrationTest {
   }
 
   @Test
-  void aValidAdminTokenIsAuthenticatedButNothingIsOpenYet() {
+  void aValidAdminTokenIsAuthenticatedButTheInternalPathStaysClosed() {
     withToken(TestTokens.admin().build()).expectStatus().isForbidden()
         .expectHeader().doesNotExist(HttpHeaders.SET_COOKIE)
         .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
@@ -57,7 +57,7 @@ class BearerTokenIntegrationTest extends AbstractIntegrationTest {
   }
 
   @Test
-  void aValidUserTokenIsDeniedToo() {
+  void aValidUserTokenIsDeniedTheInternalPathToo() {
     withToken(TestTokens.access().build()).expectStatus().isForbidden();
   }
 

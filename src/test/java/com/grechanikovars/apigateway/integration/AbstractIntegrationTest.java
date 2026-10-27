@@ -36,6 +36,16 @@ public abstract class AbstractIntegrationTest {
   @Autowired
   protected MutableClock clock;
 
+  /**
+   * Returns the key set server that the shared context reads its keys from. A test that changes
+   * its answer must restore it in a {@code finally} part.
+   *
+   * @return the server
+   */
+  protected static JwksTestServer keySetServer() {
+    return KEY_SET_SERVER;
+  }
+
   @DynamicPropertySource
   static void keySet(DynamicPropertyRegistry registry) {
     registry.add("app.security.jwks-uri", KEY_SET_SERVER::jwksUri);
