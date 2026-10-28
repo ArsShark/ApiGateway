@@ -16,5 +16,9 @@ server:
   port: ${SERVER_PORT:8080}
 
 app:
+  internal:
+    # The shared key of the internal endpoints (header X-Internal-Key): the same value in every
+    # service. There is no real default: an empty value stops the startup.
+    api-key: ${INTERNAL_API_KEY:}
   security:
     jwt-issuer: ${JWT_ISSUER:authentication-service}
