@@ -44,6 +44,7 @@ class UnavailableServiceIntegrationTest {
     registry.add("app.security.jwks-uri", KEY_SET_SERVER::jwksUri);
     registry.add("app.services.user-uri", () -> closed);
     registry.add("app.services.auth-uri", () -> closed);
+    registry.add("app.internal.api-key", () -> "internal-key-of-the-tests");
   }
 
   @Test
