@@ -7,8 +7,8 @@ services, checks the JWT of the caller and runs the user registration flow.
 [![CI](https://github.com/ArsShark/ApiGateway/actions/workflows/ci.yml/badge.svg)](https://github.com/ArsShark/ApiGateway/actions/workflows/ci.yml)
 
 **Status:** project skeleton, Dockerfile, CI pipeline, the security filter (JWT check) and the
-routes to the User Service and the Authentication Service. The registration flow and the Docker
-Compose of the whole system arrive in the next pull requests (JACAG-19).
+routes to the User Service and the Authentication Service and the registration flow. The Docker
+Compose of the whole system arrives in the next pull request (JACAG-19).
 
 ## Requirements
 
@@ -28,6 +28,7 @@ files hold only the default address of the Authentication Service.
 | `LOG_DIR` | `logs` | Directory of the log files |
 | `USER_SERVICE_URI` | `local`: `http://localhost:8082`, `docker`: `http://user-service:8082` | Internal address of the User Service |
 | `AUTH_SERVICE_URI` | `local`: `http://localhost:8081`, `docker`: `http://authentication-service:8081` | Internal address of the Authentication Service |
+| `INTERNAL_API_KEY` | none, required | The shared key of the internal endpoints (header `X-Internal-Key`); the same value in every service. The Gateway does not start without it |
 | `AUTH_JWKS_URI` | `local`: `http://localhost:8081/.well-known/jwks.json`, `docker`: `http://authentication-service:8081/.well-known/jwks.json` | Internal address of the key set of the Authentication Service. Never the address of the Gateway: it does not route the key set |
 | `JWT_ISSUER` | `authentication-service` | The `iss` that a token must have; the same value as in the Authentication Service |
 
@@ -75,6 +76,34 @@ anything. The chain is stateless and closed by default.
   removed. The Gateway adds its own `X-Forwarded-*` headers, so a client cannot make the services
   build links to a host of its own.
 
+## Registration
+
+`POST /api/auth/register` is answered by the Gateway itself. Body: `name`, `surname`, `birthDate`,
+`email`, `password`. The rules are those of the User Service (profile) and of the Authentication
+Service (password: 8 to 72 bytes, not blank); the email is the login.
+
+1. The profile is created in the User Service (`POST /internal/users`).
+2. The account is created in the Authentication Service (`POST /internal/credentials`), with the
+   email of the profile as the login and the id of the profile.
+3. The answer is 201 with the new profile (no token: the user logs in next).
+
+Each service has its own database, so there is no transaction around the two steps. If step 2
+fails, the Gateway undoes step 1 by compensation: it deletes the account by the id of the profile
+(`DELETE /internal/credentials/by-user/{userId}`) and then the profile
+(`DELETE /internal/users/{id}`). The account is deleted even when the Authentication Service did
+not answer: the answer may only have been lost, and an account without a profile would keep the
+email for ever. Both deletions accept "already gone" and are safe to repeat; a failed deletion is
+logged (`ERROR`, with the id of the profile) and does not stop the other one. The flow does not
+depend on the client: a client that disconnects in the middle cannot cancel it.
+
+| Answer | When |
+|---|---|
+| 201 | registered |
+| 400 | the body is invalid (the fields are listed, the values never) or unreadable |
+| 409 | the email is taken (the profile exists, or an account with this login does) |
+| 502 | a service answered with an error, or could not be reached |
+| 504 | a service did not answer in time |
+
 ## Run locally
 
 ```powershell
@@ -112,6 +141,11 @@ the tests. The JaCoCo report is written to `target/site/jacoco/`.
 
 ## Known limits
 
+- A crash of the Gateway between the two steps of the registration cannot be undone by the Gateway:
+  it leaves a profile without an account, which keeps its email. The same happens when the creation
+  of the profile itself gets no answer (the Gateway does not know the id). Both need a cleanup by
+  hand. A repair job would fix them; it is not part of this task.
+- An undoing whose deletions fail leaves an account or a profile behind; it is logged at `ERROR`.
 - An access token cannot be revoked: it is valid until it expires (15 minutes). A user that is
   deactivated or deleted keeps a working token until then.
 - The Gateway does not retry and has no circuit breaker: a failed call is a 502 or 504 at once.

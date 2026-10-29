@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -78,6 +79,11 @@ public final class StubServer implements AutoCloseable {
   private volatile String body = "{}";
   private volatile Map<String, String> responseHeaders = Map.of();
   private volatile Mode mode = Mode.ANSWER;
+  private final Map<String, Answer> routes = new ConcurrentHashMap<>();
+
+  /** The answer of one route. */
+  private record Answer(int status, String body, boolean hang) {
+  }
 
   private StubServer() throws IOException {
     this.server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
@@ -154,6 +160,28 @@ public final class StubServer implements AutoCloseable {
     respondWith(newStatus, newBody, Map.of());
   }
 
+  /**
+   * Sets the answer for one method and path. It wins over {@link #respondWith(int, String)}.
+   *
+   * @param method the HTTP method, for example {@code DELETE}
+   * @param path the path without the query string
+   * @param newStatus the HTTP status
+   * @param newBody the body; empty means no body
+   */
+  public void respondTo(String method, String path, int newStatus, String newBody) {
+    routes.put(routeKey(method, path), new Answer(newStatus, newBody, false));
+  }
+
+  /**
+   * Makes the server stop answering for one method and path.
+   *
+   * @param method the HTTP method
+   * @param path the path without the query string
+   */
+  public void hangOn(String method, String path) {
+    routes.put(routeKey(method, path), new Answer(0, "", true));
+  }
+
   /** Makes the server stop answering (see {@link Mode#HANG}). */
   public void hang() {
     this.mode = Mode.HANG;
@@ -165,6 +193,7 @@ public final class StubServer implements AutoCloseable {
     this.status = 200;
     this.body = "{}";
     this.responseHeaders = Map.of();
+    this.routes.clear();
     this.requests.clear();
   }
 
@@ -186,28 +215,47 @@ public final class StubServer implements AutoCloseable {
           : String.format("%s?%s", exchange.getRequestURI().getRawPath(), query);
       requests.add(new RecordedRequest(exchange.getRequestMethod(), target, headers, text));
 
-      if (mode == Mode.HANG) {
-        awaitEndOfHang();
+      String key = routeKey(exchange.getRequestMethod(), exchange.getRequestURI().getRawPath());
+      Answer route = routes.get(key);
+      if (isHanging(key)) {
+        awaitEndOfHang(key);
         return;
       }
-      byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+      int answerStatus = route == null ? status : route.status();
+      String answerBody = route == null ? body : route.body();
+      byte[] bytes = answerBody.getBytes(StandardCharsets.UTF_8);
       exchange.getResponseHeaders().add("Content-Type", "application/json");
       responseHeaders.forEach((name, value) -> exchange.getResponseHeaders().add(name, value));
       if (bytes.length == 0) {
-        exchange.sendResponseHeaders(status, -1);
+        exchange.sendResponseHeaders(answerStatus, -1);
         return;
       }
-      exchange.sendResponseHeaders(status, bytes.length);
+      exchange.sendResponseHeaders(answerStatus, bytes.length);
       try (OutputStream out = exchange.getResponseBody()) {
         out.write(bytes);
       }
     }
   }
 
-  private void awaitEndOfHang() {
+  private static String routeKey(String method, String path) {
+    return String.format("%s %s", method.toUpperCase(Locale.ROOT), path);
+  }
+
+  /** Tells whether the server must not answer this route: the whole server or the route hangs. */
+  private boolean isHanging(String key) {
+    Answer route = routes.get(key);
+    return mode == Mode.HANG || (route != null && route.hang());
+  }
+
+  /**
+   * Keeps the request open for as long as the route is set to hang, at most three seconds. A
+   * {@link #reset()} ends the wait at once. Afterwards the connection is closed without an
+   * answer.
+   */
+  private void awaitEndOfHang(String key) {
     long deadline = System.nanoTime() + HANG_LIMIT_MILLIS * 1_000_000;
     try {
-      while (mode == Mode.HANG && System.nanoTime() < deadline) {
+      while (isHanging(key) && System.nanoTime() < deadline) {
         Thread.sleep(50);
       }
     } catch (InterruptedException e) {

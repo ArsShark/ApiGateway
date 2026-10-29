@@ -20,7 +20,7 @@
     <spring-cloud.version>2025.1.4</spring-cloud.version>
     <!-- Default of the late replacement @{argLine} in the surefire configuration below. It must
          stay empty: the JaCoCo agent (prepare-agent) fills the same property. -->
-    <argLine></argLine>
+    <argLine> </argLine>
   </properties>
   <dependencyManagement>
     <dependencies>
@@ -48,6 +48,16 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-log4j2</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+      <exclusions>
+        <exclusion>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-starter-logging</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <dependency>

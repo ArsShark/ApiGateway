@@ -33,6 +33,9 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 @Import(TestClockConfiguration.class)
 public abstract class AbstractIntegrationTest {
 
+  /** The internal key of the shared context; the Gateway sends it to the internal endpoints. */
+  protected static final String INTERNAL_KEY = "internal-key-of-the-tests";
+
   private static final JwksTestServer KEY_SET_SERVER = JwksTestServer.start(TestKeys.jwksJson());
   private static final StubServer USER_SERVICE = StubServer.start();
   private static final StubServer AUTH_SERVICE = StubServer.start();
@@ -77,6 +80,8 @@ public abstract class AbstractIntegrationTest {
     registry.add("app.services.user-uri", USER_SERVICE::uri);
     registry.add("app.services.auth-uri", AUTH_SERVICE::uri);
     registry.add("spring.cloud.gateway.server.webflux.httpclient.response-timeout", () -> "1s");
+    registry.add("app.internal.api-key", () -> INTERNAL_KEY);
+    registry.add("app.internal.response-timeout", () -> "1s");
   }
 
   @BeforeEach

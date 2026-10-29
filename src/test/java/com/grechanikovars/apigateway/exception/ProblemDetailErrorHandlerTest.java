@@ -8,9 +8,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.grechanikovars.apigateway.security.ProblemDetailWriter;
 import io.netty.channel.ConnectTimeoutException;
+import io.netty.handler.timeout.ReadTimeoutException;
+import java.io.IOException;
 import java.net.ConnectException;
+import java.net.URI;
 import java.net.UnknownHostException;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerCodecConfigurer;
@@ -18,6 +23,7 @@ import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.http.server.reactive.MockServerHttpResponse;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.test.util.JsonPathExpectationsHelper;
+import org.springframework.web.reactive.function.client.WebClientRequestException;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.test.StepVerifier;
 
@@ -117,6 +123,72 @@ class ProblemDetailErrorHandlerTest {
     StepVerifier.create(handler.handle(exchange, error))
         .expectErrorSatisfies(thrown -> assertSame(error, thrown))
         .verify();
+  }
+
+  @Test
+  void anApiExceptionKeepsItsStatusAndItsConstantDetail() throws Exception {
+    MockServerWebExchange exchange = exchange();
+
+    handler.handle(exchange, ApiException.emailExists()).block();
+
+    String body = exchange.getResponse().getBodyAsString().block();
+    assertAll(
+        () -> assertEquals(HttpStatus.CONFLICT, exchange.getResponse().getStatusCode()),
+        () -> new JsonPathExpectationsHelper("$.detail")
+            .assertValue(body, "An account with this email already exists"));
+  }
+
+  @Test
+  void aBadGatewayExceptionIsA502() throws Exception {
+    MockServerWebExchange exchange = exchange();
+
+    handler.handle(exchange, ApiException.badGateway()).block();
+
+    String body = exchange.getResponse().getBodyAsString().block();
+    assertAll(
+        () -> assertEquals(HttpStatus.BAD_GATEWAY, exchange.getResponse().getStatusCode()),
+        () -> new JsonPathExpectationsHelper("$.detail").assertValue(body, "Bad Gateway"));
+  }
+
+  @Test
+  void aTimeoutOfAnAnswerInsideAFailedRequestIsA504() {
+    MockServerWebExchange exchange = exchange();
+    Throwable error = new WebClientRequestException(ReadTimeoutException.INSTANCE,
+        HttpMethod.POST, URI.create("http://auth.internal:8081/internal/credentials"),
+        new HttpHeaders());
+
+    handler.handle(exchange, error).block();
+
+    assertEquals(HttpStatus.GATEWAY_TIMEOUT, exchange.getResponse().getStatusCode());
+  }
+
+  @Test
+  void aFailedRequestWithARefusedConnectionIsA502() throws Exception {
+    MockServerWebExchange exchange = exchange();
+    Throwable error = new WebClientRequestException(
+        new ConnectException("Connection refused: auth.internal/10.0.0.6:8081"),
+        HttpMethod.POST, URI.create("http://auth.internal:8081/internal/credentials"),
+        new HttpHeaders());
+
+    handler.handle(exchange, error).block();
+
+    String body = exchange.getResponse().getBodyAsString().block();
+    assertAll(
+        () -> assertEquals(HttpStatus.BAD_GATEWAY, exchange.getResponse().getStatusCode()),
+        () -> assertFalse(body.contains("auth.internal")),
+        () -> assertFalse(body.contains("10.0.0.6")));
+  }
+
+  @Test
+  void anyOtherFailedRequestIsA502() {
+    MockServerWebExchange exchange = exchange();
+    Throwable error = new WebClientRequestException(new IOException("reset"),
+        HttpMethod.GET, URI.create("http://user.internal:8082/internal/users"),
+        new HttpHeaders());
+
+    handler.handle(exchange, error).block();
+
+    assertEquals(HttpStatus.BAD_GATEWAY, exchange.getResponse().getStatusCode());
   }
 
   private static MockServerWebExchange exchange() {
