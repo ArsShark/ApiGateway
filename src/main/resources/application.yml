@@ -7,6 +7,18 @@ spring:
     gateway:
       server:
         webflux:
+          # In Spring Cloud Gateway 5 THIS PROPERTY SWITCHES THE X-FORWARDED-* HEADERS ON. Without it
+          # the Gateway sends none to the services and removes the ones that it receives, so the
+          # services cannot build links (the Location of a created resource) that point to the
+          # Gateway. The value is a regular expression for the addresses of proxies whose own
+          # X-Forwarded-* headers are trusted. No client is trusted here (only the loopback address):
+          # the Gateway is the first proxy, and ForwardedHeadersRemovalFilter drops what a client
+          # sends anyway. Behind an Ingress (Kubernetes) the address of the Ingress belongs here.
+          trusted-proxies: '127\.0\.0\.1'
+          forwarded:
+            # Only the X-Forwarded-* headers are sent, not the standard Forwarded header as well:
+            # one source of the host and the protocol for the services.
+            enabled: false
           httpclient:
             # Never wait for a service for ever: 2 seconds to connect, 10 seconds for the answer.
             connect-timeout: 2000
