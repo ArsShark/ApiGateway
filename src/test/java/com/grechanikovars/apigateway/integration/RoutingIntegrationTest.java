@@ -199,6 +199,29 @@ class RoutingIntegrationTest extends AbstractIntegrationTest {
         () -> assertFalse(request.hasHeader("X-Forwarded-Prefix")));
   }
 
+  /**
+   * The Gateway takes the host, the port and the protocol from the address of the request it
+   * received. A {@code WebTestClient} bound to the context sends a relative address (no scheme and
+   * no host), so this test gives the client an absolute base address, like a real connection has.
+   */
+  @Test
+  void theGatewaySendsItsOwnHostPortAndProtocolAndNeverTheOnesOfAClient() {
+    WebTestClient viaGateway = webTestClient.mutate().baseUrl("http://gateway.example:8080").build();
+
+    viaGateway.get().uri("/api/users/7")
+        .header(HttpHeaders.AUTHORIZATION, bearer())
+        .header("X-Forwarded-Host", "evil.example")
+        .header("X-Forwarded-Port", "4443")
+        .header("X-Forwarded-Proto", "https")
+        .exchange().expectStatus().isOk();
+
+    RecordedRequest request = userService().lastRequest();
+    assertAll(
+        () -> assertEquals("gateway.example:8080", request.header("X-Forwarded-Host")),
+        () -> assertEquals("8080", request.header("X-Forwarded-Port")),
+        () -> assertEquals("http", request.header("X-Forwarded-Proto")));
+  }
+
   @Test
   void aSlowServiceGetsA504ProblemWithoutItsAddress() {
     userService().hang();

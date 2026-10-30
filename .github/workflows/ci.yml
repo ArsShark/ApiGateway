@@ -47,6 +47,11 @@ jobs:
       - name: Test
         run: ./mvnw -B -ntp test
 
+      # The Compose file of the whole system must stay valid. The example environment has a value
+      # for every required variable, so the check needs no secret and starts nothing.
+      - name: Validate the Docker Compose file
+        run: docker compose --env-file .env.example config --quiet
+
       # The free plan of SonarQube Cloud analyses only main and pull requests into main,
       # so the step is skipped on pushes to other branches. The organization and the project key
       # are repository variables, the token is a repository secret (Settings > Secrets and variables).

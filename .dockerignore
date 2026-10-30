@@ -6,6 +6,7 @@
 target/
 logs/
 src/test/
+postman/
 .env
 .env.*
 *.md

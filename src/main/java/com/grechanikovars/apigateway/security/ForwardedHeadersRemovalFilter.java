@@ -14,8 +14,9 @@ import reactor.core.publisher.Mono;
  *
  * <p>The services build absolute links (the {@code Location} of a created resource) from these
  * headers and trust them, because they are behind the Gateway. Spring Cloud Gateway adds its own
- * values, but it appends them to what the client sent. A client that sends
- * {@code X-Forwarded-Host: evil.example} would get links to its own host in the answers. The
+ * values (it does so only because {@code spring.cloud.gateway.server.webflux.trusted-proxies} is
+ * set, see {@code application.yml}), but it appends them to what the client sent. A client that
+ * sends {@code X-Forwarded-Host: evil.example} would get links to its own host in the answers. The
  * Gateway is the one that knows the real host, so it starts from empty headers.
  *
  * <p>When the system runs behind an Ingress (Kubernetes), the Ingress is the one that must be

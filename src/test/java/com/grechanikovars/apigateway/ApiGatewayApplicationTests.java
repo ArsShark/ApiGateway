@@ -1,6 +1,7 @@
 package com.grechanikovars.apigateway;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,6 +14,10 @@ import java.time.Clock;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cloud.gateway.filter.headers.ForwardedHeadersFilter;
+import org.springframework.cloud.gateway.filter.headers.RemoveForwardedHeadersFilter;
+import org.springframework.cloud.gateway.filter.headers.RemoveXForwardedHeadersFilter;
+import org.springframework.cloud.gateway.filter.headers.XForwardedHeadersFilter;
 import org.springframework.context.ApplicationContext;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -46,5 +51,19 @@ class ApiGatewayApplicationTests extends AbstractIntegrationTest {
         () -> assertTrue(webClientNames.contains(InternalClientsConfig.AUTH_SERVICE_WEB_CLIENT)),
         () -> assertNotNull(context.getBean(UserServiceClient.class)),
         () -> assertNotNull(context.getBean(AuthServiceClient.class)));
+  }
+
+  /**
+   * Pins the trap of Spring Cloud Gateway 5: the X-Forwarded-* headers are sent only when
+   * {@code trusted-proxies} is set. Without it the filter that removes them is registered
+   * instead, and the services would build links to their own internal address.
+   */
+  @Test
+  void theXForwardedHeadersAreSwitchedOnAndTheStandardForwardedHeaderIsNot() {
+    assertAll(
+        () -> assertEquals(1, context.getBeansOfType(XForwardedHeadersFilter.class).size()),
+        () -> assertEquals(0, context.getBeansOfType(RemoveXForwardedHeadersFilter.class).size()),
+        () -> assertEquals(0, context.getBeansOfType(ForwardedHeadersFilter.class).size()),
+        () -> assertEquals(1, context.getBeansOfType(RemoveForwardedHeadersFilter.class).size()));
   }
 }

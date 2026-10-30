@@ -6,9 +6,9 @@ services, checks the JWT of the caller and runs the user registration flow.
 
 [![CI](https://github.com/ArsShark/ApiGateway/actions/workflows/ci.yml/badge.svg)](https://github.com/ArsShark/ApiGateway/actions/workflows/ci.yml)
 
-**Status:** project skeleton, Dockerfile, CI pipeline, the security filter (JWT check) and the
-routes to the User Service and the Authentication Service and the registration flow. The Docker
-Compose of the whole system arrives in the next pull request (JACAG-19).
+**Status:** the task JACAG-19 is complete: Spring Cloud Gateway on WebFlux, the JWT check, the
+routes, the registration flow with its undoing, the Dockerfile, the CI pipeline and the Docker
+Compose of the whole system with a Postman collection that checks it.
 
 ## Requirements
 
@@ -73,8 +73,14 @@ anything. The chain is stateless and closed by default.
   `Bad Gateway` (refused, dropped, unknown host), 504 `Gateway Timeout` (no answer in time).
   The internal address of the service is never in the answer.
 - The headers `X-Internal-Key`, `Forwarded` and `X-Forwarded-*` of a request from outside are
-  removed. The Gateway adds its own `X-Forwarded-*` headers, so a client cannot make the services
-  build links to a host of its own.
+  removed. The Gateway sends its own `X-Forwarded-Host`, `-Port`, `-Proto` and `-For` to the
+  services, so the links that a service builds (the `Location` of a created resource) point to the
+  Gateway, and a client cannot make them point to a host of its own.
+- In Spring Cloud Gateway 5 the property `spring.cloud.gateway.server.webflux.trusted-proxies` is
+  what switches the `X-Forwarded-*` headers on: without it the Gateway sends none and the
+  services answer with their internal address (`http://user-service:8082/...`). It is set in
+  `application.yml`, and a test pins it. Behind an Ingress (Kubernetes) the address of the Ingress
+  belongs in this property.
 
 ## Registration
 
@@ -124,6 +130,92 @@ The image is built in two stages (JDK with the Maven Wrapper, then a JRE-only ru
 tests are not run in the image build: the CI pipeline runs them. The application runs as the
 non-root user `app`, and the log files are written to `/app/logs`.
 
+## Run the whole system
+
+`docker-compose.yml` starts everything that exists so far: the Gateway, the Authentication
+Service, the User Service, their two PostgreSQL databases and Redis. The Order and Payment
+services, MongoDB and Kafka are added in the tasks of those services.
+
+| Service | Compose name | Port | Published |
+|---|---|---|---|
+| API Gateway | `api-gateway` | 8080 | yes |
+| Authentication Service | `authentication-service` | 8081 | no |
+| User Service | `user-service` | 8082 | no |
+| PostgreSQL of the Authentication Service | `auth-postgres` | 5432 | no |
+| PostgreSQL of the User Service | `user-postgres` | 5432 | no |
+| Redis (cache of the User Service) | `redis` | 6379 | no |
+
+Only the Gateway is reachable from outside, like in the architecture: every request enters through
+it. The Gateway is built from this repository; the other two services are the images that their CI
+pipelines publish to GHCR (`ghcr.io/arsshark/authenticationservice` and
+`ghcr.io/arsshark/userservice`, tag `latest`).
+
+1. Copy `.env.example` to `.env` and set the values: the two database passwords, the internal key,
+   the signing key of the tokens and the first admin (`ADMIN_LOGIN` is an email). The comments in
+   the file say how to generate the keys.
+
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+
+   Generate the signing key the way the README of the Authentication Service describes
+   (PKCS#8 DER, base64, one line). With OpenSSL on Linux or macOS:
+
+   ```bash
+   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 | openssl pkcs8 -topk8 -nocrypt -outform DER | base64 -w0
+   ```
+
+2. Start the system:
+
+   ```powershell
+   docker compose up --build
+   ```
+
+3. Check it. The first request after the start may need a few seconds, because the Gateway
+   and the User Service read the key set of the Authentication Service with the first token:
+
+   ```powershell
+   curl.exe --noproxy "*" -i -X POST http://localhost:8080/api/auth/login `
+     -H "Content-Type: application/json" `
+     -d '{\"login\":\"<ADMIN_LOGIN>\",\"password\":\"<ADMIN_PASSWORD>\"}'
+   ```
+
+4. Stop it with `docker compose down`. The data of the databases is kept in named volumes;
+   `docker compose down -v` deletes it.
+
+To run the two services from images that you built yourself, build them in their repositories
+(`docker build -t authentication-service:dev .`, `docker build -t user-service:dev .`) and set
+`AUTH_SERVICE_IMAGE` and `USER_SERVICE_IMAGE` in `.env`. To get the newest published images run
+`docker compose pull`.
+
+The same key (`INTERNAL_API_KEY`) and the same issuer (`JWT_ISSUER`) must reach all three
+services; the Compose file passes one value to each. A password of a database is read by
+PostgreSQL only when its volume is empty: after changing it, run `docker compose down -v`.
+
+## Postman
+
+`postman/ApiGateway_postman_collection.json` checks the running system through the Gateway only
+(`baseUrl` is `http://localhost:8080`): 45 requests and 101 checks.
+
+1. Import the collection into Postman.
+2. Set the CURRENT values of the collection variables `adminLogin`, `adminPassword` and
+   `internalKey` (secrets are not stored in the file; never use the initial values).
+3. Run the folders top to bottom in the Collection Runner.
+
+| Folder | What it proves |
+|---|---|
+| 0. Setup | the admin logs in through the Gateway |
+| 1. Registration, login and tokens | register, log in, own profile, card, refresh (also with a garbage `Authorization` header), validate, a used refresh token |
+| 2. Registration errors | invalid body, malformed JSON, wrong content type, taken email, too long password |
+| 3. Routing through the Gateway | methods, bodies, queries and errors of the User Service pass through; the forged `X-Forwarded-*` headers of a client never decide the `Location` |
+| 4. Security at the edge | no token, bad tokens, `/internal` and the key set are closed even with the real internal key, a user cannot read or list other users |
+| 5. Registration rollback | a registration that fails at the account leaves no profile behind |
+| 6. Cleanup | the profiles of the run are deleted |
+
+Every run uses unique data and deletes its profiles. The accounts of the registered users stay in
+the Authentication Service: nothing deletes an account by its login, on purpose. The access token
+of the admin lives 15 minutes: run the collection again if it expires.
+
 ## Versions
 
 Spring Boot 4.0.x with Spring Cloud 2025.1.x (Spring Cloud Gateway 5.0.x, WebFlux). The other
@@ -154,6 +246,18 @@ the tests. The JaCoCo report is written to `target/site/jacoco/`.
 - At the log level `DEBUG` or `TRACE` the HTTP client of Spring and Reactor Netty write the
   internal address of the key set. The application runs at `INFO`.
 
+## Troubleshooting
+
+| Symptom | Usual cause |
+|---|---|
+| every token is 401 and the log of the Gateway or the User Service has `A token could not be verified` | the key set of the Authentication Service cannot be read: the address `AUTH_JWKS_URI` is wrong, the Authentication Service is not running, or (outside Compose) the Windows firewall blocks Java |
+| `docker compose up` says `denied` or `unauthorized` for a `ghcr.io` image | the package of the service is private or has not been published yet: make it public (Package settings) or use your own image (`AUTH_SERVICE_IMAGE`, `USER_SERVICE_IMAGE`) |
+| `required variable ... is missing a value` | a value of `.env` is missing; variables set in the shell win over `.env`, and `--env-file` replaces it |
+| the Authentication Service stops with `JWT_PRIVATE_KEY is not valid base64 on one line` | the placeholder of `.env.example` is still there: generate a key |
+| the Gateway stops with `INTERNAL_API_KEY must be set` | the variable is empty or missing in the environment of the container |
+| login says 401 for the admin | `ADMIN_LOGIN` and `ADMIN_PASSWORD` were changed after the first start: the admin is created only when the login does not exist yet |
+| `curl` cannot connect to `127.0.0.1` on a proxy port | an `http_proxy` variable is set: use `curl.exe --noproxy "*"` |
+
 ## CI pipeline
 
 The workflow `.github/workflows/ci.yml` runs on every push, on pull requests into `main` and
@@ -161,7 +265,7 @@ manually.
 
 | Job | Steps |
 |---|---|
-| `build` | build, tests, SonarQube Cloud analysis (pull requests and `main` only), upload of the JUnit and JaCoCo reports |
+| `build` | build, tests, validation of `docker-compose.yml` (`docker compose --env-file .env.example config --quiet`), SonarQube Cloud analysis (pull requests and `main` only), upload of the JUnit and JaCoCo reports |
 | `docker` | builds the image on every run; pushes `ghcr.io/arsshark/apigateway` (tags `latest` and `sha-<short commit id>`) only on pushes to `main` or on a manual run with `publish` ticked |
 
 The third-party actions are pinned to a commit SHA, because the `docker` job holds a token that

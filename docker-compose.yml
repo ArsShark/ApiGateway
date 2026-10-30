@@ -1,0 +1,133 @@
+# The whole system: the API Gateway, the Authentication Service, the User Service, their two
+# PostgreSQL databases and Redis. The Order and Payment services, MongoDB and Kafka are added in
+# the tasks of those services.
+#
+# Usage: copy .env.example to .env, set the passwords and the keys, then run
+#   docker compose up --build
+# The Gateway is built from this repository. The Authentication Service and the User Service are
+# the images that their CI pipelines publish to GHCR (see AUTH_SERVICE_IMAGE and
+# USER_SERVICE_IMAGE in .env.example to use images that you built yourself).
+#
+# Only the Gateway is published (port 8080): it is the one entry point of the system. The
+# services, the databases and Redis are reachable only inside the Compose network.
+name: e-commerce
+
+services:
+  api-gateway:
+    build: .
+    image: api-gateway:dev
+    depends_on:
+      # The services have no health check yet (probes belong to the Kubernetes task), and the
+      # Gateway reads nothing from them at startup: the key set is fetched with the first token.
+      authentication-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+    environment:
+      # The "docker" profile holds the addresses of the services: the service names below, and the
+      # key set at http://authentication-service:8081/.well-known/jwks.json.
+      SPRING_PROFILES_ACTIVE: docker
+      # The shared key of the internal endpoints: the same value in every service.
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?INTERNAL_API_KEY is required, see .env.example}
+      # The expected "iss" of the tokens: the same value as in the Authentication Service.
+      JWT_ISSUER: ${JWT_ISSUER:-authentication-service}
+    ports:
+      - "8080:8080"
+    volumes:
+      - gateway-logs:/app/logs
+
+  authentication-service:
+    image: ${AUTH_SERVICE_IMAGE:-ghcr.io/arsshark/authenticationservice:latest}
+    depends_on:
+      auth-postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      # The "docker" profile defaults to the host "postgres"; this system has one database per
+      # service, so the host is set here.
+      DB_HOST: auth-postgres
+      DB_NAME: ${AUTH_DB_NAME:-auth_service_db}
+      DB_USERNAME: ${AUTH_DB_USERNAME:?AUTH_DB_USERNAME is required, see .env.example}
+      DB_PASSWORD: ${AUTH_DB_PASSWORD:?AUTH_DB_PASSWORD is required, see .env.example}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?INTERNAL_API_KEY is required, see .env.example}
+      # The RSA private key that signs the tokens (PKCS#8 DER, base64, one line).
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?JWT_PRIVATE_KEY is required, see .env.example}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-PT15M}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-P7D}
+      JWT_ISSUER: ${JWT_ISSUER:-authentication-service}
+      # The first admin: set both or neither. Both empty means that no admin is created.
+      ADMIN_LOGIN: ${ADMIN_LOGIN:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    volumes:
+      - auth-logs:/app/logs
+
+  auth-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: ${AUTH_DB_NAME:-auth_service_db}
+      POSTGRES_USER: ${AUTH_DB_USERNAME:?AUTH_DB_USERNAME is required, see .env.example}
+      POSTGRES_PASSWORD: ${AUTH_DB_PASSWORD:?AUTH_DB_PASSWORD is required, see .env.example}
+    volumes:
+      # PostgreSQL 18+ images keep the data directory under /var/lib/postgresql/<major>/docker.
+      - auth-postgres-data:/var/lib/postgresql
+    healthcheck:
+      # "-h 127.0.0.1" forces a TCP connection. Without it pg_isready also succeeds on the
+      # temporary server of the first start, which listens only on a Unix socket.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  user-service:
+    image: ${USER_SERVICE_IMAGE:-ghcr.io/arsshark/userservice:latest}
+    depends_on:
+      user-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      DB_HOST: user-postgres
+      DB_NAME: ${USER_DB_NAME:-user_service_db}
+      DB_USERNAME: ${USER_DB_USERNAME:?USER_DB_USERNAME is required, see .env.example}
+      DB_PASSWORD: ${USER_DB_PASSWORD:?USER_DB_PASSWORD is required, see .env.example}
+      REDIS_HOST: redis
+      CACHE_USERS_TTL: ${CACHE_USERS_TTL:-10m}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?INTERNAL_API_KEY is required, see .env.example}
+      # The key set of the Authentication Service: its service name, not the Gateway (the Gateway
+      # does not route the key set).
+      AUTH_JWKS_URI: http://authentication-service:8081/.well-known/jwks.json
+      JWT_ISSUER: ${JWT_ISSUER:-authentication-service}
+    volumes:
+      - user-logs:/app/logs
+
+  user-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: ${USER_DB_NAME:-user_service_db}
+      POSTGRES_USER: ${USER_DB_USERNAME:?USER_DB_USERNAME is required, see .env.example}
+      POSTGRES_PASSWORD: ${USER_DB_PASSWORD:?USER_DB_PASSWORD is required, see .env.example}
+    volumes:
+      - user-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7
+    # The cache of the User Service is disposable: no snapshots, no append-only file.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  gateway-logs:
+  auth-logs:
+  user-logs:
+  auth-postgres-data:
+  user-postgres-data:
