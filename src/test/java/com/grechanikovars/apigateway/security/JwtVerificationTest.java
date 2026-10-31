@@ -88,7 +88,7 @@ class JwtVerificationTest {
     assertAll(
         () -> assertEquals("1", jwt.getSubject()),
         () -> assertEquals("USER", jwt.getClaimAsString("role")),
-        () -> assertEquals(7L, ((Number) jwt.getClaim("userId")).longValue()),
+        () -> assertEquals(7L, ((Number) jwt.getClaim("user_id")).longValue()),
         () -> assertEquals(1, server.requestCount()));
   }
 
