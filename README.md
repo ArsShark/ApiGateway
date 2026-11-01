@@ -2,13 +2,14 @@
 
 Part of the e-commerce microservice application (Innowise Java Advanced course).
 The Gateway is the only public entry point of the system. It routes requests to the business
-services, checks the JWT of the caller and runs the user registration flow.
+services and checks the JWT of the caller.
 
 [![CI](https://github.com/ArsShark/ApiGateway/actions/workflows/ci.yml/badge.svg)](https://github.com/ArsShark/ApiGateway/actions/workflows/ci.yml)
 
 **Status:** the task JACAG-19 is complete: Spring Cloud Gateway on WebFlux, the JWT check, the
-routes, the registration flow with its undoing, the Dockerfile, the CI pipeline and the Docker
-Compose of the whole system with a Postman collection that checks it.
+routes, the Dockerfile, the CI pipeline and the Docker Compose of the whole system with a Postman
+collection that checks it. The registration flow runs in the Authentication Service; the Gateway
+only forwards it.
 
 ## Requirements
 
@@ -28,7 +29,6 @@ files hold only the default address of the Authentication Service.
 | `LOG_DIR` | `logs` | Directory of the log files |
 | `USER_SERVICE_URI` | `local`: `http://localhost:8082`, `docker`: `http://user-service:8082` | Internal address of the User Service |
 | `AUTH_SERVICE_URI` | `local`: `http://localhost:8081`, `docker`: `http://authentication-service:8081` | Internal address of the Authentication Service |
-| `INTERNAL_API_KEY` | none, required | The shared key of the internal endpoints (header `X-Internal-Key`); the same value in every service. The Gateway does not start without it |
 | `AUTH_JWKS_URI` | `local`: `http://localhost:8081/.well-known/jwks.json`, `docker`: `http://authentication-service:8081/.well-known/jwks.json` | Internal address of the key set of the Authentication Service. Never the address of the Gateway: it does not route the key set |
 | `JWT_ISSUER` | `authentication-service` | The `iss` that a token must have; the same value as in the Authentication Service |
 
@@ -61,8 +61,7 @@ anything. The chain is stateless and closed by default.
 | Public request | Goes to |
 |---|---|
 | `/api/users/**`, `/api/cards/**` (any method) | User Service |
-| `POST /api/auth/login`, `/api/auth/refresh`, `/api/auth/validate` | Authentication Service |
-| `POST /api/auth/register` | answered by the Gateway itself (next pull request), never proxied |
+| `POST /api/auth/register`, `/api/auth/login`, `/api/auth/refresh`, `/api/auth/validate` | Authentication Service |
 
 - The routes only decide where a path goes; the security rules decide who may call it. A path
   without a route is a 404. `/internal/**` and the key set of the Authentication Service are not
@@ -84,31 +83,12 @@ anything. The chain is stateless and closed by default.
 
 ## Registration
 
-`POST /api/auth/register` is answered by the Gateway itself. Body: `name`, `surname`, `birthDate`,
-`email`, `password`. The rules are those of the User Service (profile) and of the Authentication
-Service (password: 8 to 72 bytes, not blank); the email is the login.
-
-1. The profile is created in the User Service (`POST /internal/users`).
-2. The account is created in the Authentication Service (`POST /internal/credentials`), with the
-   email of the profile as the login and the id of the profile.
-3. The answer is 201 with the new profile (no token: the user logs in next).
-
-Each service has its own database, so there is no transaction around the two steps. If step 2
-fails, the Gateway undoes step 1 by compensation: it deletes the account by the id of the profile
-(`DELETE /internal/credentials/by-user/{userId}`) and then the profile
-(`DELETE /internal/users/{id}`). The account is deleted even when the Authentication Service did
-not answer: the answer may only have been lost, and an account without a profile would keep the
-email for ever. Both deletions accept "already gone" and are safe to repeat; a failed deletion is
-logged (`ERROR`, with the id of the profile) and does not stop the other one. The flow does not
-depend on the client: a client that disconnects in the middle cannot cancel it.
-
-| Answer | When |
-|---|---|
-| 201 | registered |
-| 400 | the body is invalid (the fields are listed, the values never) or unreadable |
-| 409 | the email is taken (the profile exists, or an account with this login does) |
-| 502 | a service answered with an error, or could not be reached |
-| 504 | a service did not answer in time |
+`POST /api/auth/register` is forwarded to the Authentication Service, which runs the whole flow:
+it creates the profile in the User Service (`POST /internal/users` with the internal key), saves
+the account with the email of the profile as the login, and deletes the profile again if the
+account cannot be saved. The body, the answers (201, 400, 409, 502, 504) and the known limits are
+described in the README of the Authentication Service. The path is public: the `Authorization`
+header is not looked at, so a stale token cannot break a registration.
 
 ## Run locally
 
@@ -188,8 +168,10 @@ To run the two services from images that you built yourself, build them in their
 `AUTH_SERVICE_IMAGE` and `USER_SERVICE_IMAGE` in `.env`. To get the newest published images run
 `docker compose pull`.
 
-The same key (`INTERNAL_API_KEY`) and the same issuer (`JWT_ISSUER`) must reach all three
-services; the Compose file passes one value to each. A password of a database is read by
+The same key (`INTERNAL_API_KEY`) must reach the Authentication Service and the User Service, and
+the same issuer (`JWT_ISSUER`) all three services; the Compose file passes one value to each. The
+registration needs an Authentication Service image that contains it: until the pull request of the
+review fixes is merged and published, build that image yourself and set `AUTH_SERVICE_IMAGE`. A password of a database is read by
 PostgreSQL only when its volume is empty: after changing it, run `docker compose down -v`.
 
 ## Postman
@@ -209,7 +191,7 @@ PostgreSQL only when its volume is empty: after changing it, run `docker compose
 | 2. Registration errors | invalid body, malformed JSON, wrong content type, taken email, too long password |
 | 3. Routing through the Gateway | methods, bodies, queries and errors of the User Service pass through; the forged `X-Forwarded-*` headers of a client never decide the `Location` |
 | 4. Security at the edge | no token, bad tokens, `/internal` and the key set are closed even with the real internal key, a user cannot read or list other users |
-| 5. Registration rollback | a registration that fails at the account leaves no profile behind |
+| 5. Registration rollback | a registration that fails at the account leaves no profile behind (the undoing runs in the Authentication Service) |
 | 6. Cleanup | the profiles of the run are deleted |
 
 Every run uses unique data and deletes its profiles. The accounts of the registered users stay in
@@ -233,11 +215,8 @@ the tests. The JaCoCo report is written to `target/site/jacoco/`.
 
 ## Known limits
 
-- A crash of the Gateway between the two steps of the registration cannot be undone by the Gateway:
-  it leaves a profile without an account, which keeps its email. The same happens when the creation
-  of the profile itself gets no answer (the Gateway does not know the id). Both need a cleanup by
-  hand. A repair job would fix them; it is not part of this task.
-- An undoing whose deletions fail leaves an account or a profile behind; it is logged at `ERROR`.
+- The limits of the registration (a crash between its two steps, an undoing that fails) belong to
+  the Authentication Service: see its README.
 - An access token cannot be revoked: it is valid until it expires (15 minutes). A user that is
   deactivated or deleted keeps a working token until then.
 - The Gateway does not retry and has no circuit breaker: a failed call is a 502 or 504 at once.
@@ -254,7 +233,6 @@ the tests. The JaCoCo report is written to `target/site/jacoco/`.
 | `docker compose up` says `denied` or `unauthorized` for a `ghcr.io` image | the package of the service is private or has not been published yet: make it public (Package settings) or use your own image (`AUTH_SERVICE_IMAGE`, `USER_SERVICE_IMAGE`) |
 | `required variable ... is missing a value` | a value of `.env` is missing; variables set in the shell win over `.env`, and `--env-file` replaces it |
 | the Authentication Service stops with `JWT_PRIVATE_KEY is not valid base64 on one line` | the placeholder of `.env.example` is still there: generate a key |
-| the Gateway stops with `INTERNAL_API_KEY must be set` | the variable is empty or missing in the environment of the container |
 | login says 401 for the admin | `ADMIN_LOGIN` and `ADMIN_PASSWORD` were changed after the first start: the admin is created only when the login does not exist yet |
 | `curl` cannot connect to `127.0.0.1` on a proxy port | an `http_proxy` variable is set: use `curl.exe --noproxy "*"` |
 

@@ -27,8 +27,6 @@ services:
       # The "docker" profile holds the addresses of the services: the service names below, and the
       # key set at http://authentication-service:8081/.well-known/jwks.json.
       SPRING_PROFILES_ACTIVE: docker
-      # The shared key of the internal endpoints: the same value in every service.
-      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?INTERNAL_API_KEY is required, see .env.example}
       # The expected "iss" of the tokens: the same value as in the Authentication Service.
       JWT_ISSUER: ${JWT_ISSUER:-authentication-service}
     ports:
@@ -49,7 +47,11 @@ services:
       DB_NAME: ${AUTH_DB_NAME:-auth_service_db}
       DB_USERNAME: ${AUTH_DB_USERNAME:?AUTH_DB_USERNAME is required, see .env.example}
       DB_PASSWORD: ${AUTH_DB_PASSWORD:?AUTH_DB_PASSWORD is required, see .env.example}
+      # The shared key of the internal endpoints: the same value as in the User Service. The
+      # Authentication Service sends it when a registration creates the profile.
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:?INTERNAL_API_KEY is required, see .env.example}
+      # Where the registration creates the profile: the service name below, never the Gateway.
+      USER_SERVICE_URI: http://user-service:8082
       # The RSA private key that signs the tokens (PKCS#8 DER, base64, one line).
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:?JWT_PRIVATE_KEY is required, see .env.example}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-PT15M}
