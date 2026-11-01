@@ -8,8 +8,8 @@ import com.innowise.apigateway.client.UserServiceClient;
 import com.innowise.apigateway.dto.request.RegisterRequest;
 import com.innowise.apigateway.dto.response.RegisterResponse;
 import com.innowise.apigateway.exception.ApiException;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
@@ -43,7 +43,7 @@ import reactor.core.publisher.Sinks;
 @Service
 public class RegistrationService {
 
-  private static final Logger LOGGER = LogManager.getLogger(RegistrationService.class);
+  private static final Logger LOGGER = LoggerFactory.getLogger(RegistrationService.class);
 
   private final UserServiceClient users;
   private final AuthServiceClient accounts;

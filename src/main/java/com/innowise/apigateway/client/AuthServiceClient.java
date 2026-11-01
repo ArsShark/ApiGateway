@@ -2,8 +2,8 @@ package com.innowise.apigateway.client;
 
 import com.innowise.apigateway.config.InternalClientsConfig;
 import com.innowise.apigateway.exception.ApiException;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -21,7 +21,7 @@ import reactor.core.publisher.Mono;
 @Component
 public class AuthServiceClient {
 
-  private static final Logger LOGGER = LogManager.getLogger(AuthServiceClient.class);
+  private static final Logger LOGGER = LoggerFactory.getLogger(AuthServiceClient.class);
 
   private final WebClient webClient;
 

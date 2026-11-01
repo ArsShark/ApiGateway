@@ -6,8 +6,8 @@ import io.netty.handler.timeout.ReadTimeoutException;
 import java.net.ConnectException;
 import java.net.UnknownHostException;
 import java.util.concurrent.TimeoutException;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -46,7 +46,7 @@ import reactor.netty.http.client.PrematureCloseException;
 @Order(-2)
 public class ProblemDetailErrorHandler implements WebExceptionHandler {
 
-  private static final Logger LOGGER = LogManager.getLogger(ProblemDetailErrorHandler.class);
+  private static final Logger LOGGER = LoggerFactory.getLogger(ProblemDetailErrorHandler.class);
 
   private static final int MAX_CAUSE_DEPTH = 10;
 

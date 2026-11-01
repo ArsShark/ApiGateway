@@ -1,8 +1,8 @@
 package com.innowise.apigateway.security;
 
 import java.util.Map;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.ResolvableType;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -26,7 +26,7 @@ import reactor.core.publisher.Mono;
 @Component
 public class ProblemDetailWriter {
 
-  private static final Logger LOGGER = LogManager.getLogger(ProblemDetailWriter.class);
+  private static final Logger LOGGER = LoggerFactory.getLogger(ProblemDetailWriter.class);
 
   private static final ResolvableType PROBLEM_DETAIL = ResolvableType.forClass(ProblemDetail.class);
 
