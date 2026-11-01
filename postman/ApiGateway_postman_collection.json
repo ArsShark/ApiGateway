@@ -816,8 +816,8 @@
                   "pm.test(\"Content-Type is application/problem+json\", function () {",
                   "  pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\");",
                   "});",
-                  "pm.test(\"Detail is the constant text\", function () {",
-                  "  pm.expect(pm.response.json().detail).to.eql(\"Unsupported Media Type\");",
+                  "pm.test(\"The title is the reason phrase of the status\", function () {",
+                  "  pm.expect(pm.response.json().title).to.eql(\"Unsupported Media Type\");",
                   "});"
                 ]
               }
