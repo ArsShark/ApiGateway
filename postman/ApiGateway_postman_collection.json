@@ -1272,7 +1272,7 @@
           }
         },
         {
-          "name": "22 Deactivate the user (PATCH)",
+          "name": "22 Deactivate the user (PATCH status)",
           "event": [
             {
               "listen": "test",
@@ -1291,9 +1291,14 @@
           ],
           "request": {
             "method": "PATCH",
-            "header": [],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
-              "raw": "{{baseUrl}}/api/users/{{adminUserId}}/deactivate",
+              "raw": "{{baseUrl}}/api/users/{{adminUserId}}/status",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1301,8 +1306,17 @@
                 "api",
                 "users",
                 "{{adminUserId}}",
-                "deactivate"
+                "status"
               ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"active\": false}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           }
         },
