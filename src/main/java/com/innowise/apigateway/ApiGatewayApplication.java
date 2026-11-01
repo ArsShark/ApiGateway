@@ -8,7 +8,7 @@ import org.springframework.boot.security.autoconfigure.ReactiveUserDetailsServic
  * Entry point of the API Gateway.
  *
  * <p>The Gateway is the only public entry point of the system: it routes requests to the
- * business services, checks the JWT and runs the registration flow.
+ * business services, checks the JWT and forwards the requests.
  *
  * <p>{@link ReactiveUserDetailsServiceAutoConfiguration} is excluded: without a user store of
  * its own Spring Boot creates a user with a random password and prints it to the log. The

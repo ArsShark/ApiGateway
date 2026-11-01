@@ -24,11 +24,9 @@ import reactor.netty.http.client.PrematureCloseException;
  *
  * <p>Spring Cloud Gateway turns only the timeout of an answer into a status (504). A refused or
  * dropped connection reaches the error handling as a raw exception, and Spring Boot would answer
- * it with its own JSON and a 500. The same holds for the calls of the Gateway itself (the
- * registration). Here the error is mapped to what happened:
+ * it with its own JSON and a 500. Here the error is mapped to what happened:
  *
  * <ul>
- *   <li>an {@link ApiException}: its own status and its own constant text;
  *   <li>an exception with a status ({@code ResponseStatusException}: no route, wrong method,
  *       an unreadable body, the 504 of the timeout of a route): that status;
  *   <li>a timeout, of the connection or of the answer: 504;
@@ -37,9 +35,8 @@ import reactor.netty.http.client.PrematureCloseException;
  *   <li>anything else is a bug: 500.
  * </ul>
  *
- * <p>The detail is the standard reason phrase of the status, or the constant of the
- * {@code ApiException}. The message of any other exception is never sent: it contains the
- * internal address of the service. The answers of a service itself, also its errors, are passed on
+ * <p>The detail is the standard reason phrase of the status. The message of an exception is
+ * never sent: it contains the internal address of the service. The answers of a service itself, also its errors, are passed on
  * unchanged by the routes and never reach this handler.
  */
 @Component
@@ -65,12 +62,6 @@ public class ProblemDetailErrorHandler implements WebExceptionHandler {
   public Mono<Void> handle(ServerWebExchange exchange, Throwable error) {
     if (exchange.getResponse().isCommitted()) {
       return Mono.error(error);
-    }
-    if (error instanceof ApiException api) {
-      if (api.getStatus().is5xxServerError()) {
-        LOGGER.warn("A service did not answer properly: {}", api.getStatus().value());
-      }
-      return writer.write(exchange, api.getStatus(), api.getDetail());
     }
     HttpStatus status = statusOf(error);
     if (status == HttpStatus.INTERNAL_SERVER_ERROR) {

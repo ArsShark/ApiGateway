@@ -17,11 +17,10 @@ import org.springframework.http.HttpMethod;
  *
  * <ul>
  *   <li>{@code /api/users/**} and {@code /api/cards/**} go to the User Service;
- *   <li>{@code POST /api/auth/login}, {@code /refresh} and {@code /validate} go to the
- *       Authentication Service. The paths are listed one by one, not as {@code /api/auth/**}, so
- *       nothing else of that service is reachable by accident;
- *   <li>{@code POST /api/auth/register} has no route: the Gateway answers it itself (it creates
- *       the profile and the account).
+ *   <li>{@code POST /api/auth/register}, {@code /login}, {@code /refresh} and {@code /validate}
+ *       go to the Authentication Service, which also runs the registration (it creates the
+ *       profile in the User Service and the account). The paths are listed one by one, not as
+ *       {@code /api/auth/**}, so nothing else of that service is reachable by accident.
  * </ul>
  *
  * <p>The internal paths ({@code /internal/**}) and the key set of the Authentication Service are
@@ -47,7 +46,8 @@ public class RoutesConfig {
         .route("authentication-service", route -> route
             .method(HttpMethod.POST)
             .and()
-            .path("/api/auth/login", "/api/auth/refresh", "/api/auth/validate")
+            .path("/api/auth/register", "/api/auth/login", "/api/auth/refresh",
+                "/api/auth/validate")
             .uri(services.authUri()))
         .build();
   }

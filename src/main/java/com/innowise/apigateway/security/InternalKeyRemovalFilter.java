@@ -11,10 +11,9 @@ import reactor.core.publisher.Mono;
  * Removes the header {@code X-Internal-Key} from every request that comes from outside.
  *
  * <p>The header is the credential of the calls between the services (for example the creation of
- * an account in the Authentication Service). The Gateway sends it itself during the registration,
- * with its own client. A caller from the internet must never be able to send it through the
- * Gateway to a service, so it is dropped before anything else sees the request, also before the
- * security chain.
+ * a profile in the User Service during a registration). The Gateway itself never sends it, and a
+ * caller from the internet must never be able to send it through the Gateway to a service, so it
+ * is dropped before anything else sees the request, also before the security chain.
  *
  * <p>The value is never read or logged.
  */

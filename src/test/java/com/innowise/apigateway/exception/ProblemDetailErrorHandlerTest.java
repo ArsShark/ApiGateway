@@ -126,35 +126,10 @@ class ProblemDetailErrorHandlerTest {
   }
 
   @Test
-  void anApiExceptionKeepsItsStatusAndItsConstantDetail() throws Exception {
-    MockServerWebExchange exchange = exchange();
-
-    handler.handle(exchange, ApiException.emailExists()).block();
-
-    String body = exchange.getResponse().getBodyAsString().block();
-    assertAll(
-        () -> assertEquals(HttpStatus.CONFLICT, exchange.getResponse().getStatusCode()),
-        () -> new JsonPathExpectationsHelper("$.detail")
-            .assertValue(body, "An account with this email already exists"));
-  }
-
-  @Test
-  void aBadGatewayExceptionIsA502() throws Exception {
-    MockServerWebExchange exchange = exchange();
-
-    handler.handle(exchange, ApiException.badGateway()).block();
-
-    String body = exchange.getResponse().getBodyAsString().block();
-    assertAll(
-        () -> assertEquals(HttpStatus.BAD_GATEWAY, exchange.getResponse().getStatusCode()),
-        () -> new JsonPathExpectationsHelper("$.detail").assertValue(body, "Bad Gateway"));
-  }
-
-  @Test
   void aTimeoutOfAnAnswerInsideAFailedRequestIsA504() {
     MockServerWebExchange exchange = exchange();
     Throwable error = new WebClientRequestException(ReadTimeoutException.INSTANCE,
-        HttpMethod.POST, URI.create("http://auth.internal:8081/internal/credentials"),
+        HttpMethod.POST, URI.create("http://auth.internal:8081/api/auth/login"),
         new HttpHeaders());
 
     handler.handle(exchange, error).block();
@@ -167,7 +142,7 @@ class ProblemDetailErrorHandlerTest {
     MockServerWebExchange exchange = exchange();
     Throwable error = new WebClientRequestException(
         new ConnectException("Connection refused: auth.internal/10.0.0.6:8081"),
-        HttpMethod.POST, URI.create("http://auth.internal:8081/internal/credentials"),
+        HttpMethod.POST, URI.create("http://auth.internal:8081/api/auth/login"),
         new HttpHeaders());
 
     handler.handle(exchange, error).block();

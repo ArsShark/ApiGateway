@@ -134,15 +134,32 @@ class RoutingIntegrationTest extends AbstractIntegrationTest {
         () -> assertEquals(0, userService().requests().size()));
   }
 
+  /** The registration is run by the Authentication Service; the Gateway only forwards it. */
   @Test
-  void theRegistrationIsNeverProxiedToTheAuthenticationService() {
-    webTestClient.post().uri("/api/auth/register")
-        .contentType(MediaType.APPLICATION_JSON).bodyValue("{}")
-        .exchange();
+  void theRegistrationIsRoutedToTheAuthenticationServiceWithoutAToken() {
+    String body = "{\"name\":\"Alice\"}";
 
+    webTestClient.post().uri("/api/auth/register")
+        .contentType(MediaType.APPLICATION_JSON).bodyValue(body)
+        .exchange().expectStatus().isOk();
+
+    var requests = authService().requests();
     assertAll(
-        () -> assertEquals(0, authService().requests().size()),
+        () -> assertEquals(1, requests.size()),
+        () -> assertEquals("/api/auth/register", requests.get(0).target()),
+        () -> assertEquals(body, requests.get(0).body()),
         () -> assertEquals(0, userService().requests().size()));
+  }
+
+  /** A stale or wrong token must not break a registration: the header is ignored on this path. */
+  @Test
+  void aBadTokenDoesNotBreakTheRegistration() {
+    webTestClient.post().uri("/api/auth/register")
+        .header(HttpHeaders.AUTHORIZATION, "Bearer not-a-token")
+        .contentType(MediaType.APPLICATION_JSON).bodyValue("{}")
+        .exchange().expectStatus().isOk();
+
+    assertEquals(1, authService().requests().size());
   }
 
   @Test
