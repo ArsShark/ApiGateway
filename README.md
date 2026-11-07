@@ -7,14 +7,15 @@ services and checks the JWT of the caller.
 [![CI](https://github.com/ArsShark/ApiGateway/actions/workflows/ci.yml/badge.svg)](https://github.com/ArsShark/ApiGateway/actions/workflows/ci.yml)
 
 **Status:** the task JACAG-19 is complete: Spring Cloud Gateway on WebFlux, the JWT check, the
-routes, the Dockerfile, the CI pipeline and the Docker Compose of the whole system with a Postman
-collection that checks it. The registration flow runs in the Authentication Service; the Gateway
-only forwards it.
+routes, the Dockerfile, the CI pipeline and a Postman collection that checks the whole system. The
+Docker Compose of the whole system lives in the
+[Infrastructure](https://github.com/ArsShark/Infrastructure) repository. The registration flow runs
+in the Authentication Service; the Gateway only forwards it.
 
 ## Requirements
 
 - JDK 21
-- Docker (image build, later Docker Compose of the whole system)
+- Docker (image build)
 - The Authentication Service, which publishes the key set that verifies the tokens
 
 ## Configuration
@@ -112,74 +113,30 @@ non-root user `app`, and the log files are written to `/app/logs`.
 
 ## Run the whole system
 
-`docker-compose.yml` starts everything that exists so far: the Gateway, the Authentication
-Service, the User Service, their two PostgreSQL databases and Redis. The Order and Payment
-services, MongoDB and Kafka are added in the tasks of those services.
+The Docker Compose of the whole system (the Gateway, the Authentication Service, the User Service,
+their databases and Redis, later the Order and Payment services) lives in the
+[Infrastructure](https://github.com/ArsShark/Infrastructure) repository, together with the
+instructions: the `.env` file, the keys, the images and the networks.
 
-| Service | Compose name | Port | Published |
-|---|---|---|---|
-| API Gateway | `api-gateway` | 8080 | yes |
-| Authentication Service | `authentication-service` | 8081 | no |
-| User Service | `user-service` | 8082 | no |
-| PostgreSQL of the Authentication Service | `auth-postgres` | 5432 | no |
-| PostgreSQL of the User Service | `user-postgres` | 5432 | no |
-| Redis (cache of the User Service) | `redis` | 6379 | no |
+Compose starts the Gateway from the image that the CI pipeline of this repository publishes
+(`ghcr.io/arsshark/apigateway`). To run a Gateway that you built yourself, build the image here and
+set `API_GATEWAY_IMAGE` in the `.env` file of the Infrastructure repository:
 
-Only the Gateway is reachable from outside, like in the architecture: every request enters through
-it. The Gateway is built from this repository; the other two services are the images that their CI
-pipelines publish to GHCR (`ghcr.io/arsshark/authenticationservice` and
-`ghcr.io/arsshark/userservice`, tag `latest`).
+```powershell
+docker build -t api-gateway:dev .
+```
 
-1. Copy `.env.example` to `.env` and set the values: the two database passwords, the internal key,
-   the signing key of the tokens and the first admin (`ADMIN_LOGIN` is an email). The comments in
-   the file say how to generate the keys.
-
-   ```powershell
-   Copy-Item .env.example .env
-   ```
-
-   Generate the signing key the way the README of the Authentication Service describes
-   (PKCS#8 DER, base64, one line). With OpenSSL on Linux or macOS:
-
-   ```bash
-   openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 | openssl pkcs8 -topk8 -nocrypt -outform DER | base64 -w0
-   ```
-
-2. Start the system:
-
-   ```powershell
-   docker compose up --build
-   ```
-
-3. Check it. The first request after the start may need a few seconds, because the Gateway
-   and the User Service read the key set of the Authentication Service with the first token:
-
-   ```powershell
-   curl.exe --noproxy "*" -i -X POST http://localhost:8080/api/auth/login `
-     -H "Content-Type: application/json" `
-     -d '{\"login\":\"<ADMIN_LOGIN>\",\"password\":\"<ADMIN_PASSWORD>\"}'
-   ```
-
-4. Stop it with `docker compose down`. The data of the databases is kept in named volumes;
-   `docker compose down -v` deletes it.
-
-To run the two services from images that you built yourself, build them in their repositories
-(`docker build -t authentication-service:dev .`, `docker build -t user-service:dev .`) and set
-`AUTH_SERVICE_IMAGE` and `USER_SERVICE_IMAGE` in `.env`. To get the newest published images run
-`docker compose pull`.
-
-The same key (`INTERNAL_API_KEY`) must reach the Authentication Service and the User Service, and
-the same issuer (`JWT_ISSUER`) all three services; the Compose file passes one value to each. The
-registration needs an Authentication Service image that contains it: until the pull request of the
-review fixes is merged and published, build that image yourself and set `AUTH_SERVICE_IMAGE`. A password of a database is read by
-PostgreSQL only when its volume is empty: after changing it, run `docker compose down -v`.
+```
+API_GATEWAY_IMAGE=api-gateway:dev
+```
 
 ## Postman
 
 `postman/ApiGateway_postman_collection.json` checks the running system through the Gateway only
 (`baseUrl` is `http://localhost:8080`): 45 requests and 101 checks.
 
-1. Import the collection into Postman.
+1. Start the system with the Docker Compose of the Infrastructure repository and import the
+   collection into Postman.
 2. Set the CURRENT values of the collection variables `adminLogin`, `adminPassword` and
    `internalKey` (secrets are not stored in the file; never use the initial values).
 3. Run the folders top to bottom in the Collection Runner.
@@ -230,10 +187,7 @@ the tests. The JaCoCo report is written to `target/site/jacoco/`.
 | Symptom | Usual cause |
 |---|---|
 | every token is 401 and the log of the Gateway or the User Service has `A token could not be verified` | the key set of the Authentication Service cannot be read: the address `AUTH_JWKS_URI` is wrong, the Authentication Service is not running, or (outside Compose) the Windows firewall blocks Java |
-| `docker compose up` says `denied` or `unauthorized` for a `ghcr.io` image | the package of the service is private or has not been published yet: make it public (Package settings) or use your own image (`AUTH_SERVICE_IMAGE`, `USER_SERVICE_IMAGE`) |
-| `required variable ... is missing a value` | a value of `.env` is missing; variables set in the shell win over `.env`, and `--env-file` replaces it |
-| the Authentication Service stops with `JWT_PRIVATE_KEY is not valid base64 on one line` | the placeholder of `.env.example` is still there: generate a key |
-| login says 401 for the admin | `ADMIN_LOGIN` and `ADMIN_PASSWORD` were changed after the first start: the admin is created only when the login does not exist yet |
+| the whole system does not start (`.env`, images, keys, passwords of the databases) | see the README of the Infrastructure repository |
 | `curl` cannot connect to `127.0.0.1` on a proxy port | an `http_proxy` variable is set: use `curl.exe --noproxy "*"` |
 
 ## CI pipeline
@@ -243,7 +197,7 @@ manually.
 
 | Job | Steps |
 |---|---|
-| `build` | build, tests, validation of `docker-compose.yml` (`docker compose --env-file .env.example config --quiet`), SonarQube Cloud analysis (pull requests and `main` only), upload of the JUnit and JaCoCo reports |
+| `build` | build, tests, SonarQube Cloud analysis (pull requests and `main` only), upload of the JUnit and JaCoCo reports |
 | `docker` | builds the image on every run; pushes `ghcr.io/arsshark/apigateway` (tags `latest` and `sha-<short commit id>`) only on pushes to `main` or on a manual run with `publish` ticked |
 
 The third-party actions are pinned to a commit SHA, because the `docker` job holds a token that
