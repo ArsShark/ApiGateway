@@ -22,7 +22,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 /**
- * Checks what the caller gets when a service cannot be reached at all: the addresses of both
+ * Checks what the caller gets when a service cannot be reached at all: the addresses of all
  * services point to a port where nobody listens, so the connection is refused. This is the
  * outage that Spring Cloud Gateway does not translate itself. The class has its own Spring
  * context, because it needs other addresses than the shared one.
@@ -44,6 +44,7 @@ class UnavailableServiceIntegrationTest {
     registry.add("app.security.jwks-uri", KEY_SET_SERVER::jwksUri);
     registry.add("app.services.user-uri", () -> closed);
     registry.add("app.services.auth-uri", () -> closed);
+    registry.add("app.services.order-uri", () -> closed);
   }
 
   @Test

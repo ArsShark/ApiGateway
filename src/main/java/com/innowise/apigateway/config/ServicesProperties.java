@@ -7,16 +7,18 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * The internal addresses of the services that the Gateway routes to.
  *
- * <p>Both values are checked when the settings are bound, so a wrong value stops the startup
+ * <p>All values are checked when the settings are bound, so a wrong value stops the startup
  * instead of failing on the first request.
  *
  * @param userUri the base address of the User Service ({@code USER_SERVICE_URI}), for example
  *     {@code http://user-service:8082}
  * @param authUri the base address of the Authentication Service ({@code AUTH_SERVICE_URI}). The
  *     defaults depend on the Spring profile and are defined in the profile files
+ * @param orderUri the base address of the Order Service ({@code ORDER_SERVICE_URI}), for example
+ *     {@code http://order-service:8083}
  */
 @ConfigurationProperties(prefix = "app.services")
-public record ServicesProperties(String userUri, String authUri) {
+public record ServicesProperties(String userUri, String authUri, String orderUri) {
 
   /**
    * Checks the settings.
@@ -27,6 +29,7 @@ public record ServicesProperties(String userUri, String authUri) {
   public ServicesProperties {
     requireHttpUri("app.services.user-uri", userUri);
     requireHttpUri("app.services.auth-uri", authUri);
+    requireHttpUri("app.services.order-uri", orderUri);
   }
 
   private static void requireHttpUri(String name, String value) {
