@@ -33,6 +33,9 @@ import reactor.core.publisher.Mono;
  *   <li>{@code POST /api/auth/validate}: any caller with a role;
  *   <li>{@code /api/users/**} and {@code /api/cards/**}: any caller with a role. Which role may do
  *       what, and whose data it is, is decided by the User Service, which checks the token again;
+ *   <li>{@code /api/orders/**} and {@code /api/items/**}: any caller with a role. Which role may
+ *       do what, and whose order it is, is decided by the Order Service, which checks the token
+ *       again;
  *   <li>everything else is denied, also paths that do not exist and the internal paths. An
  *       anonymous caller gets 401, an authenticated one 403.
  * </ol>
@@ -85,6 +88,7 @@ public class SecurityConfig {
             .matchers(PublicPaths.MATCHER).permitAll()
             .pathMatchers(HttpMethod.POST, "/api/auth/validate").hasAnyRole("ADMIN", "USER")
             .pathMatchers("/api/users/**", "/api/cards/**").hasAnyRole("ADMIN", "USER")
+            .pathMatchers("/api/orders/**", "/api/items/**").hasAnyRole("ADMIN", "USER")
             .anyExchange().denyAll())
         .build();
   }

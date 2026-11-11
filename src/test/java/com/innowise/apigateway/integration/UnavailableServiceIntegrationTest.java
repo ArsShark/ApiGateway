@@ -75,6 +75,18 @@ class UnavailableServiceIntegrationTest {
         .jsonPath("$.detail").isEqualTo("Bad Gateway");
   }
 
+  @Test
+  void aRefusedConnectionToTheOrderServiceIsA502Problem() {
+    webTestClient.get().uri("/api/orders/my")
+        .header(HttpHeaders.AUTHORIZATION,
+            String.format("Bearer %s", TestTokens.access().build()))
+        .exchange()
+        .expectStatus().isEqualTo(502)
+        .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+        .expectBody()
+        .jsonPath("$.detail").isEqualTo("Bad Gateway");
+  }
+
   private static int freePort() {
     try (ServerSocket socket = new ServerSocket(0)) {
       return socket.getLocalPort();

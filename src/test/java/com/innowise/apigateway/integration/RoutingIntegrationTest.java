@@ -21,6 +21,7 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 class RoutingIntegrationTest extends AbstractIntegrationTest {
 
   private static final String USER_BODY = "{\"id\":7}";
+  private static final String ORDER_BODY = "{\"id\":3}";
 
   private static String bearer() {
     return String.format("Bearer %s", TestTokens.access().build());
@@ -254,5 +255,149 @@ class RoutingIntegrationTest extends AbstractIntegrationTest {
 
     String text = new String(body.returnResult().getResponseBody());
     assertFalse(text.contains(userService().uri()));
+  }
+
+  @Test
+  void anOrderRequestIsForwardedWithItsMethodPathQueryAndToken() {
+    orderService().respondWith(200, ORDER_BODY);
+    String authorization = bearer();
+
+    webTestClient.get().uri("/api/orders?statuses=PENDING,PAID&page=1")
+        .header(HttpHeaders.AUTHORIZATION, authorization)
+        .exchange()
+        .expectStatus().isOk()
+        .expectBody(String.class).isEqualTo(ORDER_BODY);
+
+    RecordedRequest request = orderService().lastRequest();
+    assertAll(
+        () -> assertEquals(1, orderService().requests().size()),
+        () -> assertEquals("GET", request.method()),
+        () -> assertEquals("/api/orders?statuses=PENDING,PAID&page=1", request.target()),
+        () -> assertEquals(authorization, request.header(HttpHeaders.AUTHORIZATION)),
+        () -> assertEquals(0, userService().requests().size()),
+        () -> assertEquals(0, authService().requests().size()));
+  }
+
+  @Test
+  void aBodyAndItsContentTypeAreForwardedToTheOrderService() {
+    orderService().respondWith(201, ORDER_BODY);
+    String json = """
+        {"items":[{"itemId":3,"quantity":2}]}""";
+
+    webTestClient.post().uri("/api/orders")
+        .header(HttpHeaders.AUTHORIZATION, bearer())
+        .contentType(MediaType.APPLICATION_JSON)
+        .bodyValue(json)
+        .exchange()
+        .expectStatus().isCreated();
+
+    RecordedRequest request = orderService().lastRequest();
+    assertAll(
+        () -> assertEquals("POST", request.method()),
+        () -> assertEquals("/api/orders", request.target()),
+        () -> assertEquals(json, request.body()),
+        () -> assertTrue(request.header(HttpHeaders.CONTENT_TYPE).startsWith("application/json")));
+  }
+
+  @Test
+  void theItemsAndTheOwnOrdersPathsGoToTheOrderServiceToo() {
+    webTestClient.get().uri("/api/items/3")
+        .header(HttpHeaders.AUTHORIZATION, bearer()).exchange().expectStatus().isOk();
+    webTestClient.get().uri("/api/orders/my")
+        .header(HttpHeaders.AUTHORIZATION, bearer()).exchange().expectStatus().isOk();
+    webTestClient.patch().uri("/api/orders/3/cancel")
+        .header(HttpHeaders.AUTHORIZATION, bearer()).exchange().expectStatus().isOk();
+
+    var requests = orderService().requests();
+    assertAll(
+        () -> assertEquals(3, requests.size()),
+        () -> assertEquals("/api/items/3", requests.get(0).target()),
+        () -> assertEquals("/api/orders/my", requests.get(1).target()),
+        () -> assertEquals("PATCH", requests.get(2).method()),
+        () -> assertEquals("/api/orders/3/cancel", requests.get(2).target()),
+        () -> assertEquals(0, userService().requests().size()));
+  }
+
+  @Test
+  void theStatusTheHeadersAndTheBodyOfTheOrderServiceArePassedBackUnchanged() {
+    String problem = "{\"status\":404,\"detail\":\"Order with id 5 not found\"}";
+    orderService().respondWith(404, problem,
+        Map.of("Location", "http://example.test/api/orders/9", "X-Request-Id", "abc"));
+
+    webTestClient.get().uri("/api/orders/5")
+        .header(HttpHeaders.AUTHORIZATION, bearer())
+        .exchange()
+        .expectStatus().isNotFound()
+        .expectHeader().valueEquals("Location", "http://example.test/api/orders/9")
+        .expectHeader().valueEquals("X-Request-Id", "abc")
+        .expectBody(String.class).isEqualTo(problem);
+  }
+
+  @Test
+  void theInternalKeyOfAClientNeverReachesTheOrderService() {
+    webTestClient.get().uri("/api/orders/my")
+        .header(HttpHeaders.AUTHORIZATION, bearer())
+        .header("X-Internal-Key", "the-key-of-an-attacker")
+        .exchange().expectStatus().isOk();
+
+    assertFalse(orderService().lastRequest().hasHeader("X-Internal-Key"));
+  }
+
+  @Test
+  void theOrderServiceGetsTheHostPortAndProtocolOfTheGatewayAndNeverTheOnesOfAClient() {
+    WebTestClient viaGateway =
+        webTestClient.mutate().baseUrl("http://gateway.example:8080").build();
+
+    viaGateway.post().uri("/api/orders")
+        .header(HttpHeaders.AUTHORIZATION, bearer())
+        .header("X-Forwarded-Host", "evil.example")
+        .header("X-Forwarded-Port", "4443")
+        .header("X-Forwarded-Proto", "https")
+        .header("Forwarded", "for=6.6.6.6;host=evil.example")
+        .contentType(MediaType.APPLICATION_JSON)
+        .bodyValue("{}")
+        .exchange().expectStatus().isOk();
+
+    RecordedRequest request = orderService().lastRequest();
+    assertAll(
+        () -> assertEquals("gateway.example:8080", request.header("X-Forwarded-Host")),
+        () -> assertEquals("8080", request.header("X-Forwarded-Port")),
+        () -> assertEquals("http", request.header("X-Forwarded-Proto")),
+        () -> assertFalse(request.hasHeader("Forwarded")),
+        () -> assertFalse(request.headers().toString().contains("evil")));
+  }
+
+  @Test
+  void aSlowOrderServiceGetsA504ProblemWithoutItsAddress() {
+    orderService().hang();
+
+    WebTestClient.BodyContentSpec body = webTestClient.get().uri("/api/orders/my")
+        .header(HttpHeaders.AUTHORIZATION, bearer())
+        .exchange()
+        .expectStatus().isEqualTo(504)
+        .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+        .expectBody()
+        .jsonPath("$.status").isEqualTo(504)
+        .jsonPath("$.detail").isEqualTo("Gateway Timeout");
+
+    String text = new String(body.returnResult().getResponseBody());
+    assertFalse(text.contains(orderService().uri()));
+  }
+
+  @Test
+  void aPathNextToTheOrderPathsReachesNoService() {
+    String authorization = bearer();
+
+    webTestClient.get().uri("/api/order/1")
+        .header(HttpHeaders.AUTHORIZATION, authorization).exchange().expectStatus().isForbidden();
+    webTestClient.get().uri("/api/orders-archive/1")
+        .header(HttpHeaders.AUTHORIZATION, authorization).exchange().expectStatus().isForbidden();
+    webTestClient.get().uri("/internal/orders")
+        .header(HttpHeaders.AUTHORIZATION, authorization).exchange().expectStatus().isForbidden();
+
+    assertAll(
+        () -> assertEquals(0, orderService().requests().size()),
+        () -> assertEquals(0, userService().requests().size()),
+        () -> assertEquals(0, authService().requests().size()));
   }
 }
