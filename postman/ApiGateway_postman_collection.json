@@ -2170,7 +2170,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "const runId = pm.collectionVariables.get(\"runId\");",
-                  "pm.collectionVariables.set(\"borisEmail\", `boris.${runId}@example.com`);",
+                  "pm.collectionVariables.set(\"borisEmail\", `boris.orders.${runId}@example.com`);",
                   "pm.collectionVariables.set(\"borisPassword\", `Pw-${runId}-bB`);"
                 ]
               }
