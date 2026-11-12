@@ -1,5 +1,6 @@
 package com.innowise.apigateway.integration;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -7,6 +8,7 @@ import com.innowise.apigateway.TestTokens;
 import java.time.Duration;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -43,6 +45,10 @@ class AccessRulesIntegrationTest extends AbstractIntegrationTest {
         Arguments.of("POST", "/internal/credentials", "anonymous", UNAUTHORIZED),
         Arguments.of("GET", "/.well-known/jwks.json", "anonymous", UNAUTHORIZED),
         Arguments.of("GET", "/api/orders/1", "anonymous", UNAUTHORIZED),
+        Arguments.of("POST", "/api/orders", "anonymous", UNAUTHORIZED),
+        Arguments.of("GET", "/api/orders/my", "anonymous", UNAUTHORIZED),
+        Arguments.of("GET", "/api/items", "anonymous", UNAUTHORIZED),
+        Arguments.of("POST", "/api/items", "anonymous", UNAUTHORIZED),
         Arguments.of("GET", "/actuator/health", "anonymous", UNAUTHORIZED),
         // user
         Arguments.of("GET", "/api/users/7", "user", OPEN),
@@ -53,15 +59,31 @@ class AccessRulesIntegrationTest extends AbstractIntegrationTest {
         Arguments.of("GET", "/api/auth/login", "user", FORBIDDEN),
         Arguments.of("POST", "/internal/credentials", "user", FORBIDDEN),
         Arguments.of("GET", "/internal/users", "user", FORBIDDEN),
-        Arguments.of("GET", "/api/orders/1", "user", FORBIDDEN),
+        Arguments.of("GET", "/api/orders/1", "user", OPEN),
+        Arguments.of("POST", "/api/orders", "user", OPEN),
+        Arguments.of("GET", "/api/orders/my", "user", OPEN),
+        Arguments.of("PATCH", "/api/orders/3/cancel", "user", OPEN),
+        Arguments.of("DELETE", "/api/orders/3", "user", OPEN),
+        Arguments.of("GET", "/api/items", "user", OPEN),
+        // the Gateway lets a user send this; the Order Service refuses it with a 403 of its own
+        Arguments.of("POST", "/api/items", "user", OPEN),
+        // paths next to the routed ones are not routed: closed for everybody
+        Arguments.of("GET", "/api/order/1", "user", FORBIDDEN),
+        Arguments.of("GET", "/api/orders-archive/1", "user", FORBIDDEN),
+        Arguments.of("GET", "/api/items-old", "user", FORBIDDEN),
+        Arguments.of("GET", "/internal/orders", "user", FORBIDDEN),
         Arguments.of("GET", "/.well-known/jwks.json", "user", FORBIDDEN),
         // admin: the same open paths, and nothing more
         Arguments.of("GET", "/api/users", "admin", OPEN),
-        Arguments.of("PATCH", "/api/users/7/activate", "admin", OPEN),
+        Arguments.of("PATCH", "/api/users/7/status", "admin", OPEN),
         Arguments.of("GET", "/api/cards", "admin", OPEN),
         Arguments.of("POST", "/api/auth/validate", "admin", OPEN),
         Arguments.of("POST", "/internal/users", "admin", FORBIDDEN),
-        Arguments.of("GET", "/api/orders/1", "admin", FORBIDDEN));
+        Arguments.of("GET", "/api/orders/1", "admin", OPEN),
+        Arguments.of("GET", "/api/orders", "admin", OPEN),
+        Arguments.of("POST", "/api/items", "admin", OPEN),
+        Arguments.of("DELETE", "/api/items/3", "admin", OPEN),
+        Arguments.of("GET", "/api/orders-archive/1", "admin", FORBIDDEN));
   }
 
   static Stream<Arguments> badTokens() {
@@ -103,6 +125,19 @@ class AccessRulesIntegrationTest extends AbstractIntegrationTest {
         .header(HttpHeaders.AUTHORIZATION, String.format("Bearer %s", token))
         .exchange()
         .expectStatus().isForbidden();
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"SUPERUSER", "admin", "user", "ADMIN USER"})
+  void aRoleThatIsNotExactlyAdminOrUserOpensNoOrderPath(String role) {
+    String token = TestTokens.access().role(role).build();
+
+    assertAll(Stream.of("/api/orders", "/api/orders/my", "/api/items")
+        .map(path -> (Executable) () -> webTestClient.get().uri(path)
+            .header(HttpHeaders.AUTHORIZATION, String.format("Bearer %s", token))
+            .exchange()
+            .expectStatus().isForbidden()));
+    assertEquals(0, orderService().requests().size());
   }
 
   @ParameterizedTest(name = "{0}")

@@ -4,3 +4,4 @@ app:
   services:
     user-uri: ${USER_SERVICE_URI:http://user-service:8082}
     auth-uri: ${AUTH_SERVICE_URI:http://authentication-service:8081}
+    order-uri: ${ORDER_SERVICE_URI:http://order-service:8083}

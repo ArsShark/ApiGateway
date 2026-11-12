@@ -22,7 +22,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 /**
- * Checks what the caller gets when a service cannot be reached at all: the addresses of both
+ * Checks what the caller gets when a service cannot be reached at all: the addresses of all
  * services point to a port where nobody listens, so the connection is refused. This is the
  * outage that Spring Cloud Gateway does not translate itself. The class has its own Spring
  * context, because it needs other addresses than the shared one.
@@ -44,6 +44,7 @@ class UnavailableServiceIntegrationTest {
     registry.add("app.security.jwks-uri", KEY_SET_SERVER::jwksUri);
     registry.add("app.services.user-uri", () -> closed);
     registry.add("app.services.auth-uri", () -> closed);
+    registry.add("app.services.order-uri", () -> closed);
   }
 
   @Test
@@ -70,6 +71,18 @@ class UnavailableServiceIntegrationTest {
         .contentType(MediaType.APPLICATION_JSON).bodyValue("{}")
         .exchange()
         .expectStatus().isEqualTo(502)
+        .expectBody()
+        .jsonPath("$.detail").isEqualTo("Bad Gateway");
+  }
+
+  @Test
+  void aRefusedConnectionToTheOrderServiceIsA502Problem() {
+    webTestClient.get().uri("/api/orders/my")
+        .header(HttpHeaders.AUTHORIZATION,
+            String.format("Bearer %s", TestTokens.access().build()))
+        .exchange()
+        .expectStatus().isEqualTo(502)
+        .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
         .expectBody()
         .jsonPath("$.detail").isEqualTo("Bad Gateway");
   }

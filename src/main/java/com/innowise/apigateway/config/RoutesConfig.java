@@ -17,6 +17,8 @@ import org.springframework.http.HttpMethod;
  *
  * <ul>
  *   <li>{@code /api/users/**} and {@code /api/cards/**} go to the User Service;
+ *   <li>{@code /api/orders/**} and {@code /api/items/**} go to the Order Service (the items are
+ *       the catalog that the orders are made of, and the Order Service owns them);
  *   <li>{@code POST /api/auth/register}, {@code /login}, {@code /refresh} and {@code /validate}
  *       go to the Authentication Service, which also runs the registration (it creates the
  *       profile in the User Service and the account). The paths are listed one by one, not as
@@ -43,6 +45,9 @@ public class RoutesConfig {
         .route("user-service", route -> route
             .path("/api/users/**", "/api/cards/**")
             .uri(services.userUri()))
+        .route("order-service", route -> route
+            .path("/api/orders/**", "/api/items/**")
+            .uri(services.orderUri()))
         .route("authentication-service", route -> route
             .method(HttpMethod.POST)
             .and()
