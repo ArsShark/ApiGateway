@@ -22,6 +22,7 @@ class RoutingIntegrationTest extends AbstractIntegrationTest {
 
   private static final String USER_BODY = "{\"id\":7}";
   private static final String ORDER_BODY = "{\"id\":3}";
+  private static final String PAYMENT_BODY = "{\"id\":\"65f0c0ffee0123456789abcd\"}";
 
   private static String bearer() {
     return String.format("Bearer %s", TestTokens.access().build());
@@ -396,6 +397,160 @@ class RoutingIntegrationTest extends AbstractIntegrationTest {
         .header(HttpHeaders.AUTHORIZATION, authorization).exchange().expectStatus().isForbidden();
 
     assertAll(
+        () -> assertEquals(0, orderService().requests().size()),
+        () -> assertEquals(0, userService().requests().size()),
+        () -> assertEquals(0, authService().requests().size()));
+  }
+
+  @Test
+  void aPaymentRequestIsForwardedWithItsMethodPathQueryAndToken() {
+    paymentService().respondWith(200, PAYMENT_BODY);
+    String authorization = bearer();
+    String target = String.format("/api/payments/my/total?from=%s&before=%s",
+        "2026-11-25T10:00:00.123Z", "2026-11-25T10:00:00.124Z");
+
+    webTestClient.get().uri(target)
+        .header(HttpHeaders.AUTHORIZATION, authorization)
+        .exchange()
+        .expectStatus().isOk()
+        .expectBody(String.class).isEqualTo(PAYMENT_BODY);
+
+    RecordedRequest request = paymentService().lastRequest();
+    assertAll(
+        () -> assertEquals(1, paymentService().requests().size()),
+        () -> assertEquals("GET", request.method()),
+        () -> assertEquals(target, request.target()),
+        () -> assertEquals(authorization, request.header(HttpHeaders.AUTHORIZATION)),
+        () -> assertEquals(0, userService().requests().size()),
+        () -> assertEquals(0, authService().requests().size()),
+        () -> assertEquals(0, orderService().requests().size()));
+  }
+
+  @Test
+  void aBodyAndItsContentTypeAreForwardedToThePaymentService() {
+    paymentService().respondWith(201, PAYMENT_BODY);
+    String json = """
+        {"orderId":5,"amount":24.00}""";
+
+    webTestClient.post().uri("/api/payments")
+        .header(HttpHeaders.AUTHORIZATION, bearer())
+        .contentType(MediaType.APPLICATION_JSON)
+        .bodyValue(json)
+        .exchange()
+        .expectStatus().isCreated();
+
+    RecordedRequest request = paymentService().lastRequest();
+    assertAll(
+        () -> assertEquals("POST", request.method()),
+        () -> assertEquals("/api/payments", request.target()),
+        () -> assertEquals(json, request.body()),
+        () -> assertTrue(request.header(HttpHeaders.CONTENT_TYPE).startsWith("application/json")));
+  }
+
+  @Test
+  void everyPaymentPathGoesToThePaymentServiceAndToNobodyElse() {
+    webTestClient.get().uri("/api/payments/65f0c0ffee0123456789abcd")
+        .header(HttpHeaders.AUTHORIZATION, bearer()).exchange().expectStatus().isOk();
+    webTestClient.get().uri("/api/payments/my?status=SUCCESS")
+        .header(HttpHeaders.AUTHORIZATION, bearer()).exchange().expectStatus().isOk();
+    webTestClient.get().uri("/api/payments")
+        .header(HttpHeaders.AUTHORIZATION, bearer()).exchange().expectStatus().isOk();
+    webTestClient.get().uri("/api/payments/total?from=a&before=b")
+        .header(HttpHeaders.AUTHORIZATION, bearer()).exchange().expectStatus().isOk();
+
+    var requests = paymentService().requests();
+    assertAll(
+        () -> assertEquals(4, requests.size()),
+        () -> assertEquals("/api/payments/65f0c0ffee0123456789abcd", requests.get(0).target()),
+        () -> assertEquals("/api/payments/my?status=SUCCESS", requests.get(1).target()),
+        () -> assertEquals("/api/payments", requests.get(2).target()),
+        () -> assertEquals("/api/payments/total?from=a&before=b", requests.get(3).target()),
+        () -> assertEquals(0, userService().requests().size()),
+        () -> assertEquals(0, orderService().requests().size()),
+        () -> assertEquals(0, authService().requests().size()));
+  }
+
+  @Test
+  void theStatusTheHeadersAndTheBodyOfThePaymentServiceArePassedBackUnchanged() {
+    String problem = "{\"status\":409,\"detail\":\"Order 5 is already paid\"}";
+    paymentService().respondWith(409, problem,
+        Map.of("Location", "http://example.test/api/payments/x", "X-Request-Id", "abc"));
+
+    webTestClient.post().uri("/api/payments")
+        .header(HttpHeaders.AUTHORIZATION, bearer())
+        .contentType(MediaType.APPLICATION_JSON)
+        .bodyValue("{\"orderId\":5,\"amount\":24.00}")
+        .exchange()
+        .expectStatus().isEqualTo(409)
+        .expectHeader().valueEquals("Location", "http://example.test/api/payments/x")
+        .expectHeader().valueEquals("X-Request-Id", "abc")
+        .expectBody(String.class).isEqualTo(problem);
+  }
+
+  @Test
+  void theInternalKeyOfAClientNeverReachesThePaymentService() {
+    webTestClient.get().uri("/api/payments/my")
+        .header(HttpHeaders.AUTHORIZATION, bearer())
+        .header("X-Internal-Key", "the-key-of-an-attacker")
+        .exchange().expectStatus().isOk();
+
+    assertFalse(paymentService().lastRequest().hasHeader("X-Internal-Key"));
+  }
+
+  @Test
+  void thePaymentServiceGetsTheHostPortAndProtocolOfTheGatewayAndNeverTheOnesOfAClient() {
+    WebTestClient viaGateway =
+        webTestClient.mutate().baseUrl("http://gateway.example:8080").build();
+
+    viaGateway.post().uri("/api/payments")
+        .header(HttpHeaders.AUTHORIZATION, bearer())
+        .header("X-Forwarded-Host", "evil.example")
+        .header("X-Forwarded-Port", "4443")
+        .header("X-Forwarded-Proto", "https")
+        .header("Forwarded", "for=6.6.6.6;host=evil.example")
+        .contentType(MediaType.APPLICATION_JSON)
+        .bodyValue("{}")
+        .exchange().expectStatus().isOk();
+
+    RecordedRequest request = paymentService().lastRequest();
+    assertAll(
+        () -> assertEquals("gateway.example:8080", request.header("X-Forwarded-Host")),
+        () -> assertEquals("8080", request.header("X-Forwarded-Port")),
+        () -> assertEquals("http", request.header("X-Forwarded-Proto")),
+        () -> assertFalse(request.hasHeader("Forwarded")),
+        () -> assertFalse(request.headers().toString().contains("evil")));
+  }
+
+  @Test
+  void aSlowPaymentServiceGetsA504ProblemWithoutItsAddress() {
+    paymentService().hang();
+
+    WebTestClient.BodyContentSpec body = webTestClient.get().uri("/api/payments/my")
+        .header(HttpHeaders.AUTHORIZATION, bearer())
+        .exchange()
+        .expectStatus().isEqualTo(504)
+        .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+        .expectBody()
+        .jsonPath("$.status").isEqualTo(504)
+        .jsonPath("$.detail").isEqualTo("Gateway Timeout");
+
+    String text = new String(body.returnResult().getResponseBody());
+    assertFalse(text.contains(paymentService().uri()));
+  }
+
+  @Test
+  void aPathNextToThePaymentPathsReachesNoService() {
+    String authorization = bearer();
+
+    webTestClient.get().uri("/api/payment/1")
+        .header(HttpHeaders.AUTHORIZATION, authorization).exchange().expectStatus().isForbidden();
+    webTestClient.get().uri("/api/payments-old/1")
+        .header(HttpHeaders.AUTHORIZATION, authorization).exchange().expectStatus().isForbidden();
+    webTestClient.get().uri("/internal/payments")
+        .header(HttpHeaders.AUTHORIZATION, authorization).exchange().expectStatus().isForbidden();
+
+    assertAll(
+        () -> assertEquals(0, paymentService().requests().size()),
         () -> assertEquals(0, orderService().requests().size()),
         () -> assertEquals(0, userService().requests().size()),
         () -> assertEquals(0, authService().requests().size()));

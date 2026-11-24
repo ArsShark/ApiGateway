@@ -88,6 +88,25 @@ class UnavailableServiceIntegrationTest {
         .jsonPath("$.detail").isEqualTo("Bad Gateway");
   }
 
+  @Test
+  void aRefusedConnectionToThePaymentServiceIsA502Problem() {
+    String body = new String(webTestClient.post().uri("/api/payments")
+        .header(HttpHeaders.AUTHORIZATION,
+            String.format("Bearer %s", TestTokens.access().build()))
+        .contentType(MediaType.APPLICATION_JSON)
+        .bodyValue("{\"orderId\":5,\"amount\":24.00}")
+        .exchange()
+        .expectStatus().isEqualTo(502)
+        .expectHeader().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
+        .expectBody()
+        .jsonPath("$.detail").isEqualTo("Bad Gateway")
+        .returnResult().getResponseBody());
+
+    assertAll(
+        () -> assertFalse(body.contains("127.0.0.1")),
+        () -> assertFalse(body.contains(String.valueOf(CLOSED_PORT))));
+  }
+
   private static int freePort() {
     try (ServerSocket socket = new ServerSocket(0)) {
       return socket.getLocalPort();
