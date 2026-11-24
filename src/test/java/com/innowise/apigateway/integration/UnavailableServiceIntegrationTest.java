@@ -45,6 +45,7 @@ class UnavailableServiceIntegrationTest {
     registry.add("app.services.user-uri", () -> closed);
     registry.add("app.services.auth-uri", () -> closed);
     registry.add("app.services.order-uri", () -> closed);
+    registry.add("app.services.payment-uri", () -> closed);
   }
 
   @Test

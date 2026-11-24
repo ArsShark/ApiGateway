@@ -22,8 +22,9 @@ class ServicesPropertiesTest {
   void validAddressesAreAccepted() {
     assertAll(
         () -> assertDoesNotThrow(
-            () -> new ServicesProperties(VALID, "https://auth.example", VALID)),
-        () -> assertEquals(VALID, new ServicesProperties(VALID, VALID, VALID).userUri()));
+            () -> new ServicesProperties(VALID, "https://auth.example", VALID, VALID)),
+        () -> assertEquals(VALID,
+            new ServicesProperties(VALID, VALID, VALID, VALID).userUri()));
   }
 
   @ParameterizedTest
@@ -32,7 +33,7 @@ class ServicesPropertiesTest {
       "http://", "not a uri"})
   void aWrongUserAddressStopsTheStartup(String value) {
     IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
-        () -> new ServicesProperties(value, VALID, VALID));
+        () -> new ServicesProperties(value, VALID, VALID, VALID));
 
     assertTrue(error.getMessage().contains("app.services.user-uri"));
   }
@@ -42,7 +43,7 @@ class ServicesPropertiesTest {
   @ValueSource(strings = {"ftp://auth", "auth:8081"})
   void aWrongAuthAddressStopsTheStartup(String value) {
     IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
-        () -> new ServicesProperties(VALID, value, VALID));
+        () -> new ServicesProperties(VALID, value, VALID, VALID));
 
     assertTrue(error.getMessage().contains("app.services.auth-uri"));
   }
@@ -52,7 +53,7 @@ class ServicesPropertiesTest {
   @ValueSource(strings = {"ftp://order", "order:8083", "http://"})
   void aWrongOrderAddressStopsTheStartup(String value) {
     IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
-        () -> new ServicesProperties(VALID, VALID, value));
+        () -> new ServicesProperties(VALID, VALID, value, VALID));
 
     assertTrue(error.getMessage().contains("app.services.order-uri"));
   }
@@ -60,6 +61,22 @@ class ServicesPropertiesTest {
   @Test
   void theOrderAddressIsKept() {
     assertEquals("http://order-service:8083",
-        new ServicesProperties(VALID, VALID, "http://order-service:8083").orderUri());
+        new ServicesProperties(VALID, VALID, "http://order-service:8083", VALID).orderUri());
+  }
+
+  @ParameterizedTest
+  @NullAndEmptySource
+  @ValueSource(strings = {"  ", "ftp://payment", "payment:8084", "/api/payments", "http://"})
+  void aWrongPaymentAddressStopsTheStartup(String value) {
+    IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+        () -> new ServicesProperties(VALID, VALID, VALID, value));
+
+    assertTrue(error.getMessage().contains("app.services.payment-uri"));
+  }
+
+  @Test
+  void thePaymentAddressIsKept() {
+    assertEquals("http://payment-service:8084",
+        new ServicesProperties(VALID, VALID, VALID, "http://payment-service:8084").paymentUri());
   }
 }

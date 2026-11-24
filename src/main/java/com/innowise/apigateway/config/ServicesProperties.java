@@ -16,9 +16,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *     defaults depend on the Spring profile and are defined in the profile files
  * @param orderUri the base address of the Order Service ({@code ORDER_SERVICE_URI}), for example
  *     {@code http://order-service:8083}
+ * @param paymentUri the base address of the Payment Service ({@code PAYMENT_SERVICE_URI}), for
+ *     example {@code http://payment-service:8084}
  */
 @ConfigurationProperties(prefix = "app.services")
-public record ServicesProperties(String userUri, String authUri, String orderUri) {
+public record ServicesProperties(
+    String userUri, String authUri, String orderUri, String paymentUri) {
 
   /**
    * Checks the settings.
@@ -30,6 +33,7 @@ public record ServicesProperties(String userUri, String authUri, String orderUri
     requireHttpUri("app.services.user-uri", userUri);
     requireHttpUri("app.services.auth-uri", authUri);
     requireHttpUri("app.services.order-uri", orderUri);
+    requireHttpUri("app.services.payment-uri", paymentUri);
   }
 
   private static void requireHttpUri(String name, String value) {
