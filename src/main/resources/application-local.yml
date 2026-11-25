@@ -5,3 +5,4 @@ app:
     user-uri: ${USER_SERVICE_URI:http://localhost:8082}
     auth-uri: ${AUTH_SERVICE_URI:http://localhost:8081}
     order-uri: ${ORDER_SERVICE_URI:http://localhost:8083}
+    payment-uri: ${PAYMENT_SERVICE_URI:http://localhost:8084}

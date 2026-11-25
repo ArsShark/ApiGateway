@@ -49,6 +49,10 @@ class AccessRulesIntegrationTest extends AbstractIntegrationTest {
         Arguments.of("GET", "/api/orders/my", "anonymous", UNAUTHORIZED),
         Arguments.of("GET", "/api/items", "anonymous", UNAUTHORIZED),
         Arguments.of("POST", "/api/items", "anonymous", UNAUTHORIZED),
+        Arguments.of("POST", "/api/payments", "anonymous", UNAUTHORIZED),
+        Arguments.of("GET", "/api/payments/65f0c0ffee0123456789abcd", "anonymous", UNAUTHORIZED),
+        Arguments.of("GET", "/api/payments/my", "anonymous", UNAUTHORIZED),
+        Arguments.of("GET", "/api/payments/total", "anonymous", UNAUTHORIZED),
         Arguments.of("GET", "/actuator/health", "anonymous", UNAUTHORIZED),
         // user
         Arguments.of("GET", "/api/users/7", "user", OPEN),
@@ -67,11 +71,23 @@ class AccessRulesIntegrationTest extends AbstractIntegrationTest {
         Arguments.of("GET", "/api/items", "user", OPEN),
         // the Gateway lets a user send this; the Order Service refuses it with a 403 of its own
         Arguments.of("POST", "/api/items", "user", OPEN),
+        Arguments.of("POST", "/api/payments", "user", OPEN),
+        Arguments.of("GET", "/api/payments/65f0c0ffee0123456789abcd", "user", OPEN),
+        Arguments.of("GET", "/api/payments/my", "user", OPEN),
+        Arguments.of("GET", "/api/payments/my/total", "user", OPEN),
+        // the Gateway lets a user send these two; the Payment Service refuses them with a 403
+        Arguments.of("GET", "/api/payments", "user", OPEN),
+        Arguments.of("GET", "/api/payments/total", "user", OPEN),
+        // a payment never changes: the Gateway does not know that, the Payment Service answers
+        Arguments.of("DELETE", "/api/payments/65f0c0ffee0123456789abcd", "user", OPEN),
         // paths next to the routed ones are not routed: closed for everybody
         Arguments.of("GET", "/api/order/1", "user", FORBIDDEN),
         Arguments.of("GET", "/api/orders-archive/1", "user", FORBIDDEN),
         Arguments.of("GET", "/api/items-old", "user", FORBIDDEN),
         Arguments.of("GET", "/internal/orders", "user", FORBIDDEN),
+        Arguments.of("GET", "/api/payment/1", "user", FORBIDDEN),
+        Arguments.of("GET", "/api/payments-old/1", "user", FORBIDDEN),
+        Arguments.of("GET", "/internal/payments", "user", FORBIDDEN),
         Arguments.of("GET", "/.well-known/jwks.json", "user", FORBIDDEN),
         // admin: the same open paths, and nothing more
         Arguments.of("GET", "/api/users", "admin", OPEN),
@@ -83,7 +99,12 @@ class AccessRulesIntegrationTest extends AbstractIntegrationTest {
         Arguments.of("GET", "/api/orders", "admin", OPEN),
         Arguments.of("POST", "/api/items", "admin", OPEN),
         Arguments.of("DELETE", "/api/items/3", "admin", OPEN),
-        Arguments.of("GET", "/api/orders-archive/1", "admin", FORBIDDEN));
+        Arguments.of("GET", "/api/payments", "admin", OPEN),
+        Arguments.of("GET", "/api/payments/total", "admin", OPEN),
+        Arguments.of("POST", "/api/payments", "admin", OPEN),
+        Arguments.of("GET", "/api/orders-archive/1", "admin", FORBIDDEN),
+        Arguments.of("GET", "/api/payments-old/1", "admin", FORBIDDEN),
+        Arguments.of("POST", "/internal/payments", "admin", FORBIDDEN));
   }
 
   static Stream<Arguments> badTokens() {
@@ -138,6 +159,19 @@ class AccessRulesIntegrationTest extends AbstractIntegrationTest {
             .exchange()
             .expectStatus().isForbidden()));
     assertEquals(0, orderService().requests().size());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"SUPERUSER", "admin", "user", "ADMIN USER"})
+  void aRoleThatIsNotExactlyAdminOrUserOpensNoPaymentPath(String role) {
+    String token = TestTokens.access().role(role).build();
+
+    assertAll(Stream.of("/api/payments", "/api/payments/my", "/api/payments/total")
+        .map(path -> (Executable) () -> webTestClient.get().uri(path)
+            .header(HttpHeaders.AUTHORIZATION, String.format("Bearer %s", token))
+            .exchange()
+            .expectStatus().isForbidden()));
+    assertEquals(0, paymentService().requests().size());
   }
 
   @ParameterizedTest(name = "{0}")

@@ -11,7 +11,7 @@ routes, the Dockerfile, the CI pipeline and a Postman collection that checks the
 Docker Compose of the whole system lives in the
 [Infrastructure](https://github.com/ArsShark/Infrastructure) repository. The registration flow runs
 in the Authentication Service; the Gateway only forwards it. The orders and the items are routed to
-the Order Service.
+the Order Service, the payments to the Payment Service.
 
 ## Requirements
 
@@ -32,6 +32,7 @@ files hold only the default address of the Authentication Service.
 | `USER_SERVICE_URI` | `local`: `http://localhost:8082`, `docker`: `http://user-service:8082` | Internal address of the User Service |
 | `AUTH_SERVICE_URI` | `local`: `http://localhost:8081`, `docker`: `http://authentication-service:8081` | Internal address of the Authentication Service |
 | `ORDER_SERVICE_URI` | `local`: `http://localhost:8083`, `docker`: `http://order-service:8083` | Internal address of the Order Service |
+| `PAYMENT_SERVICE_URI` | `local`: `http://localhost:8084`, `docker`: `http://payment-service:8084` | Internal address of the Payment Service |
 | `AUTH_JWKS_URI` | `local`: `http://localhost:8081/.well-known/jwks.json`, `docker`: `http://authentication-service:8081/.well-known/jwks.json` | Internal address of the key set of the Authentication Service. Never the address of the Gateway: it does not route the key set |
 | `JWT_ISSUER` | `authentication-service` | The `iss` that a token must have; the same value as in the Authentication Service |
 
@@ -47,6 +48,7 @@ anything. The chain is stateless and closed by default.
 | `POST /api/auth/validate` | a caller with the role `ADMIN` or `USER` |
 | `/api/users/**`, `/api/cards/**` | a caller with the role `ADMIN` or `USER`; who may do what is decided by the User Service, which checks the token again |
 | `/api/orders/**`, `/api/items/**` | a caller with the role `ADMIN` or `USER`; which role may do what and whose order it is are decided by the Order Service, which checks the token again |
+| `/api/payments/**` | a caller with the role `ADMIN` or `USER`; which role may do what and whose payment it is are decided by the Payment Service, which checks the token again |
 | everything else, the internal paths and the key set included | nobody: 401 for an anonymous caller, 403 for an authenticated one |
 
 - A missing, wrong, expired or unverifiable token gets the same answer: 401 with the detail
@@ -66,6 +68,7 @@ anything. The chain is stateless and closed by default.
 |---|---|
 | `/api/users/**`, `/api/cards/**` (any method) | User Service |
 | `/api/orders/**`, `/api/items/**` (any method) | Order Service |
+| `/api/payments/**` (any method) | Payment Service |
 | `POST /api/auth/register`, `/api/auth/login`, `/api/auth/refresh`, `/api/auth/validate` | Authentication Service |
 
 - The routes only decide where a path goes; the security rules decide who may call it. A path
@@ -118,7 +121,7 @@ non-root user `app`, and the log files are written to `/app/logs`.
 ## Run the whole system
 
 The Docker Compose of the whole system (the Gateway, the Authentication Service, the User Service,
-the Order Service, their databases and Redis, later the Payment service) lives in the
+the Order Service, the Payment Service, their databases, Redis and Kafka) lives in the
 [Infrastructure](https://github.com/ArsShark/Infrastructure) repository, together with the
 instructions: the `.env` file, the keys, the images and the networks.
 
@@ -137,7 +140,7 @@ API_GATEWAY_IMAGE=api-gateway:dev
 ## Postman
 
 `postman/ApiGateway_postman_collection.json` checks the running system through the Gateway only
-(`baseUrl` is `http://localhost:8080`): 77 requests and 169 checks.
+(`baseUrl` is `http://localhost:8080`): 102 requests and 227 checks.
 
 1. Start the system with the Docker Compose of the Infrastructure repository and import the
    collection into Postman.
@@ -154,13 +157,23 @@ API_GATEWAY_IMAGE=api-gateway:dev
 | 4. Security at the edge | no token, bad tokens, `/internal` and the key set are closed even with the real internal key, a user cannot read or list other users |
 | 5. Registration rollback | a registration that fails at the account leaves no profile behind (the undoing runs in the Authentication Service) |
 | 6. Orders and items | two registered users and the admin: the items (admin only), an order with the total calculated by the server and the owner data from the User Service, ownership (a foreign order is the same 404 as a missing one), the life cycle (replace, cancel, delete), validation errors, the `Location` of created resources points to the Gateway |
-| 7. Cleanup | the profiles, the orders and the items of the run are deleted; the order of a deleted profile shows no owner |
+| 7. Payments | Anna orders and pays through the Gateway: the Payment Service, the random number service, MongoDB and the event on Kafka that makes the order PAID; the refusals (no token, an admin without a profile, a bad amount, a paid order again), ownership (a foreign payment is the same 404 as a missing one), the lists, the filters and the sort names, and the totals for a half-open period |
+| 8. Cleanup | the profiles, the orders and the items of the run are deleted (a paid order too: only an admin may); the order of a deleted profile shows no owner |
 
 Every run uses unique data and deletes its profiles, orders and items. The accounts of the
 registered users stay in the Authentication Service: nothing deletes an account by its login, on
 purpose. The orders and the items are deleted softly, so their rows stay in the database of the
-Order Service (`docker compose down -v` resets it). The access token of the admin lives 15
-minutes: run the collection again if it expires.
+Order Service (`docker compose down -v` resets it). A payment never changes and cannot be deleted,
+so the payments of every run stay in the database of the Payment Service.
+
+The status of a payment is random: the Payment Service asks a random number service, an even
+number is SUCCESS and an odd one FAILED, and both are a 201. Request 73 therefore repeats the
+payment (at most 20 requests) until one is SUCCESS, so the folder does not depend on luck and the
+number of checks is always the same. The random number service is outside the system and the first
+call after a start is the slowest (DNS, TLS), so the Payment Service may answer 502 or 504 and save
+nothing; request 73 asks again, but at most 3 times. The folder needs that service to be reachable
+from the Payment Service: if it is not, request 73 fails with a message that lists the codes, and
+the requests that need its payment fail after it (the run goes on to the end). The access token of the admin lives 15 minutes: run the collection again if it expires.
 
 Two checks that Postman cannot do, by hand on the system started from the Infrastructure
 repository (log in first, then use the token of a registered user):
@@ -169,6 +182,7 @@ repository (log in first, then use the token of a registered user):
 |---|---|
 | `docker compose stop user-service`, then `GET /api/orders/{id}` | 200, the order with `user: null` and `userInfoAvailable: false`: the Order Service answers without the owner data and the Gateway passes its answer on |
 | `docker compose stop order-service`, then `GET /api/orders/my` | 502 `Bad Gateway` as `application/problem+json`, no internal address in the answer |
+| `docker compose stop payment-service`, then `GET /api/payments/my` | 502 `Bad Gateway`, the same |
 
 Start the service again with `docker compose start <name>` afterwards.
 
@@ -205,6 +219,7 @@ the tests. The JaCoCo report is written to `target/site/jacoco/`.
 |---|---|
 | every token is 401 and the log of the Gateway or the User Service has `A token could not be verified` | the key set of the Authentication Service cannot be read: the address `AUTH_JWKS_URI` is wrong, the Authentication Service is not running, or (outside Compose) the Windows firewall blocks Java |
 | `/api/orders/...` or `/api/items/...` gives 502 `Bad Gateway` | the Order Service is not running, or `ORDER_SERVICE_URI` points to a wrong address |
+| `/api/payments/...` gives 502 `Bad Gateway` | the Payment Service is not running, or `PAYMENT_SERVICE_URI` points to a wrong address |
 | the whole system does not start (`.env`, images, keys, passwords of the databases) | see the README of the Infrastructure repository |
 | `curl` cannot connect to `127.0.0.1` on a proxy port | an `http_proxy` variable is set: use `curl.exe --noproxy "*"` |
 
