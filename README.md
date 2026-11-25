@@ -140,7 +140,7 @@ API_GATEWAY_IMAGE=api-gateway:dev
 ## Postman
 
 `postman/ApiGateway_postman_collection.json` checks the running system through the Gateway only
-(`baseUrl` is `http://localhost:8080`): 102 requests and 228 checks.
+(`baseUrl` is `http://localhost:8080`): 102 requests and 227 checks.
 
 1. Start the system with the Docker Compose of the Infrastructure repository and import the
    collection into Postman.
@@ -168,10 +168,12 @@ so the payments of every run stay in the database of the Payment Service.
 
 The status of a payment is random: the Payment Service asks a random number service, an even
 number is SUCCESS and an odd one FAILED, and both are a 201. Request 73 therefore repeats the
-payment (at most 20 attempts) until one is SUCCESS, so the folder does not depend on luck and the
-number of checks is always the same. The folder needs the random number service to be reachable
-from the Payment Service: if it is not, request 73 fails with the 502 or 504 of the Payment
-Service. The access token of the admin lives 15 minutes: run the collection again if it expires.
+payment (at most 20 requests) until one is SUCCESS, so the folder does not depend on luck and the
+number of checks is always the same. The random number service is outside the system and the first
+call after a start is the slowest (DNS, TLS), so the Payment Service may answer 502 or 504 and save
+nothing; request 73 asks again, but at most 3 times. The folder needs that service to be reachable
+from the Payment Service: if it is not, request 73 fails with a message that lists the codes, and
+the requests that need its payment fail after it (the run goes on to the end). The access token of the admin lives 15 minutes: run the collection again if it expires.
 
 Two checks that Postman cannot do, by hand on the system started from the Infrastructure
 repository (log in first, then use the token of a registered user):
